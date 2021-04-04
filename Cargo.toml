@@ -11,5 +11,14 @@ categories = ["command-line-utilities", "digital forensics"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "fbhash"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+overflow-checks = true
+panic = "abort"
+
 [dependencies]
 env_logger = "0.8.3"

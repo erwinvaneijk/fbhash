@@ -1,6 +1,6 @@
 
 use std::fs::File;
-use std::io::{Read, Error};
+use std::io::Read;
 
 
 const CHUNK_SIZE: usize = 7;
@@ -30,7 +30,7 @@ impl ChunkContent {
     //
     // Initialize the content with the first bytes
     //
-    pub fn setup(&mut self, v: &Vec<u8>) -> Chunk {
+    pub fn setup(&mut self, v: &[u8]) -> Chunk {
         self.content.copy_from_slice(v);
         Chunk{number: self.current_number, digest: self.compute_digest()}
     }
@@ -54,10 +54,10 @@ impl ChunkContent {
 
     fn compute_digest(&mut self) -> u64 {
         let mut h = 0;
-        let mut k = CHUNK_SIZE;
+        let mut k : u32 = CHUNK_SIZE as u32;
         for e in &self.content {
             let elem = *e as u64;
-            h = (h + elem * A.pow((k as u32) - 1)) % MODULUS;
+            h = (h + elem * A.pow(k - 1)) % MODULUS;
             k -= 1;
         }
         h
@@ -73,12 +73,12 @@ pub struct ChunkIterator {
 }
 
 impl ChunkIterator {
-    fn new(file: File) -> Result<ChunkIterator, Error> {
-        Ok(ChunkIterator{
-            file: file,
+    fn new(file: File) -> ChunkIterator {
+        ChunkIterator{
+            file,
             chunk_content: ChunkContent::new(),
             last_chunk: None
-        })
+        }
     }
 }
 
@@ -95,8 +95,7 @@ impl<'a> Iterator for ChunkIterator {
                         None,
                     Ok(_) =>
                     {
-                        let mut chunk_content = ChunkContent::new();
-                        let chunk = chunk_content.setup(&initial_content);
+                        let chunk = self.chunk_content.setup(&initial_content);
                         self.last_chunk = Some(chunk);
                         Some(chunk)
                     }
@@ -107,7 +106,9 @@ impl<'a> Iterator for ChunkIterator {
                 match self.file.read(&mut b) {
                     Ok(0) => None,
                     Ok(..) => {
-                        Some(self.chunk_content.update(self.last_chunk.unwrap().digest, b[0]))
+                        //Some(self.chunk_content.update(self.last_chunk.unwrap().digest, b[0]))
+                        let new_value = self.chunk_content.update(0, b[0]);
+                        Some(new_value)
                     }
                     Err(_) =>
                         None
@@ -119,7 +120,7 @@ impl<'a> Iterator for ChunkIterator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::ChunkIterator;
     use std::io;
     use std::fs::File;
 
@@ -129,9 +130,9 @@ mod tests {
     }
 
     #[test]
-    fn test_first_chunk_from_file() -> io::Result<()> {
+    fn test_first_chunk_from_zero_file() -> io::Result<()> {
         let f = File::open("testdata/testfile-zero.bin")?;
-        let mut chunk_iterator = ChunkIterator::new(f)?;
+        let mut chunk_iterator = ChunkIterator::new(f);
         let chunk = chunk_iterator.next().unwrap();
 
         assert_eq!(chunk.number, 0);
@@ -140,14 +141,47 @@ mod tests {
     }
 
     #[test]
-    fn test_get_all_chunks_from_file() -> io::Result<()> {
+    fn test_get_all_chunks_from_zero_file() -> io::Result<()> {
         let f = File::open("testdata/testfile-zero.bin")?;
-        let chunk_iterator = ChunkIterator::new(f)?;
+        let chunk_iterator = ChunkIterator::new(f);
         let chunks: Vec<_> = chunk_iterator.collect();
         assert_eq!(chunks.len(), 512 - 6);
         for (i, chunk) in chunks.iter().enumerate() {
             assert_eq!(chunk.number, i);
             assert_eq!(chunk.digest, 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_three_chunks_from_yes_file() -> io::Result<()> {
+        let f = File::open("testdata/testfile-yes.bin")?;
+        let mut chunk_iterator = ChunkIterator::new(f);
+        let chunk0 = chunk_iterator.next().unwrap();
+        assert_eq!(chunk0.number, 0);
+        assert_eq!(chunk0.digest, 33279275454869446);
+        let chunk1 = chunk_iterator.next().unwrap();
+        assert_eq!(chunk1.number, 1);
+        let chunk2 = chunk_iterator.next().unwrap();
+        assert_eq!(chunk2.number, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_all_chunks_from_yes_file() -> io::Result<()> {
+        // This file contains 'y' and '\n' for 256 times. The digests should
+        // thus be alternating.
+        let f = File::open("testdata/testfile-yes.bin")?;
+        let chunk_iterator = ChunkIterator::new(f);
+        let chunks: Vec<_> = chunk_iterator.collect();
+        assert_eq!(chunks.len(), 512 - 6);
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert_eq!(chunk.number, i);
+            if i%2 == 0 {
+                assert_eq!(chunk.digest, 33279275454869446);
+            } else {
+                assert_eq!(chunk.digest, 2879926931474365);
+            }
         }
         Ok(())
     }

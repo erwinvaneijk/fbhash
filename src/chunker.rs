@@ -175,8 +175,10 @@ mod tests {
         assert_eq!(chunk0.digest, 33279275454869446);
         let chunk1 = chunk_iterator.next().unwrap();
         assert_eq!(chunk1.number, 1);
+        assert_eq!(chunk1.digest, 2879926931474365);
         let chunk2 = chunk_iterator.next().unwrap();
         assert_eq!(chunk2.number, 2);
+        assert_eq!(chunk2.digest, 33279275454869446);
         Ok(())
     }
 

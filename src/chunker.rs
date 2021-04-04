@@ -167,6 +167,19 @@ mod tests {
     }
 
     #[test]
+    fn test_zero_length_file() -> io::Result<()> {
+        let f = File::open("testdata/testfile-zero-length")?;
+        let chunk_iterator = ChunkIterator::new(f);
+        let chunks: Vec<_> = chunk_iterator.collect();
+        assert_eq!(chunks.len(), 1);
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert_eq!(chunk.number, i);
+            assert_eq!(chunk.digest, 0);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn test_get_three_chunks_from_yes_file() -> io::Result<()> {
         let f = File::open("testdata/testfile-yes.bin")?;
         let mut chunk_iterator = ChunkIterator::new(f);

@@ -1,0 +1,15 @@
+[package]
+name = "fbhash"
+version = "0.1.0"
+authors = ["Erwin van Eijk <235739+erwinvaneijk@users.noreply.github.com>"]
+edition = "2018"
+repository = "https://github.com/erwinvaneijk/fbhash"
+description = "A Similarity Hashing Scheme for Digital Forensics"
+readme = "README.md"
+license = "MIT"
+categories = ["command-line-utilities", "digital forensics"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+env_logger = "0.8.3"

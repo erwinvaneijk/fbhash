@@ -16,14 +16,16 @@ pub struct Chunk {
 #[derive(Debug)]
 pub struct ChunkContent {
     current_number: usize,
-    content: Vec<u8>
+    content: Vec<u8>,
+    max_a: u64,
 }
 
 impl ChunkContent {
     pub fn new() -> ChunkContent {
         ChunkContent{
             current_number: 0,
-            content: vec![0; CHUNK_SIZE]
+            content: vec![0; CHUNK_SIZE],
+            max_a: A.pow(CHUNK_SIZE as u32)
         }
     }
 
@@ -44,12 +46,21 @@ impl ChunkContent {
      *   the first byte's formula from the digest and adding the last bytes formula
      *   to the new digest.
      */
-    pub fn update(&mut self, _previous: u64, new_byte: u8) -> Chunk {
+    pub fn update(&mut self, previous: u64, new_byte: u8) -> Chunk {
         // Shift everything one byte to the left
+        let first_byte = self.content[0];
         self.content.copy_within(1.., 0);
         self.content[CHUNK_SIZE - 1] = new_byte;
         self.current_number += 1;
-        Chunk{number: self.current_number, digest: self.compute_digest()}
+        let new_digest = self.rehash_digest(previous, first_byte, new_byte);
+        Chunk{number: self.current_number, digest: new_digest}
+    }
+
+    fn rehash_digest(&mut self, digest: u64, old_byte: u8, new_byte: u8) -> u64 {
+        let b_i = old_byte as u64;
+        let b_k = new_byte as u64;
+        //((A * digest).wrapping_sub(b_i * A.pow(k)) + b_k) % MODULUS
+        ((A * digest).wrapping_sub(b_i * self.max_a) + b_k) % MODULUS
     }
 
     fn compute_digest(&mut self) -> u64 {
@@ -106,8 +117,10 @@ impl<'a> Iterator for ChunkIterator {
                 match self.file.read(&mut b) {
                     Ok(0) => None,
                     Ok(..) => {
-                        //Some(self.chunk_content.update(self.last_chunk.unwrap().digest, b[0]))
-                        let new_value = self.chunk_content.update(0, b[0]);
+                        let previous_digest = self.last_chunk.unwrap().digest;
+                        let new_value = self.chunk_content.update(previous_digest, b[0]);
+                        self.last_chunk = Some(new_value);
+                        //let new_value = self.chunk_content.update(0, b[0]);
                         Some(new_value)
                     }
                     Err(_) =>

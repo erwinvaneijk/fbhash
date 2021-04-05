@@ -161,6 +161,11 @@ mod tests {
     }
 
     #[test]
+    fn test_litmus2() {
+        assert!(approx_eq!(f32, 2.0 - 1.0, 1.0, epsilon = 0.00001));
+    }
+
+    #[test]
     fn test_first_chunk_from_zero_file() -> io::Result<()> {
         let f = File::open("testdata/testfile-zero.bin")?;
         let mut chunk_iterator = ChunkIterator::new(f);

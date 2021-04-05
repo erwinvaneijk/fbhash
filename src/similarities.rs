@@ -76,7 +76,6 @@ mod tests {
         match m.get(&2879926931474365) {
             Some(score) => {
                 let expected_score: f64 = 1.0 + (253.0 as f64).log10();
-                println!("Found score: {} {} {}", *score, expected_score, approx_eq!(f64, *score, expected_score.log10(), epsilon = 0.001));
                 assert!(approx_eq!(f64, *score, expected_score, epsilon = 0.001))
             },
             None => panic!("This value should exist")

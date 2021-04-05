@@ -1,7 +1,25 @@
+// Copyright 2021, Erwin van Eijk
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+// IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+// CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+// TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+// SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use std::fs::File;
 use std::io::Read;
-
 
 const CHUNK_SIZE: usize = 7;
 const A : u64 = 255;
@@ -9,8 +27,8 @@ const MODULUS: u64 = 801385653117583579;
 
 #[derive(Clone, Debug, Copy)]
 pub struct Chunk {
-    number: usize,
-    digest: u64
+    pub number: usize,
+    pub digest: u64
 }
 
 #[derive(Debug)]
@@ -84,7 +102,7 @@ pub struct ChunkIterator {
 }
 
 impl ChunkIterator {
-    fn new(file: File) -> ChunkIterator {
+    pub fn new(file: File) -> ChunkIterator {
         ChunkIterator{
             file,
             chunk_content: ChunkContent::new(),
@@ -93,7 +111,7 @@ impl ChunkIterator {
     }
 }
 
-impl<'a> Iterator for ChunkIterator {
+impl Iterator for ChunkIterator {
     type Item = Chunk;
 
     fn next(& mut self) -> Option<Chunk> {

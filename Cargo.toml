@@ -22,3 +22,10 @@ panic = "abort"
 
 [dependencies]
 env_logger = "0.8.3"
+itertools = "0.10.0"
+frequency = "^1.0.0"
+frequency-hashmap = "^1.0.0"
+
+[dev-dependencies]
+pretty_assertions = "0.4.0"
+float-cmp = "0.8.0"

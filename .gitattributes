@@ -1,0 +1,10 @@
+# Default change the line endings
+*       text=auto
+
+# Don't touch shell files.
+*.sh    -rclf
+
+*.bin   binary
+*.class binary
+*.jar   binary
+*.gif   binary

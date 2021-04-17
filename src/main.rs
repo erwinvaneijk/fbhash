@@ -25,10 +25,13 @@ extern crate pretty_assertions;
 #[macro_use]
 extern crate float_cmp;
 
+use std::io;
 
 mod chunker;
 mod similarities;
 
 fn main() {
-    println!("Hello, world!");
+    let mut document_collection = similarities::DocumentCollection::new();
+    let files: Vec<String> = vec!["testdata/testfile_yes.bin".to_string(), "testdata/testfile_zero.bin".to_string()];
+    let _results = files.iter().map(|f| document_collection.add_file(f).unwrap());
 }

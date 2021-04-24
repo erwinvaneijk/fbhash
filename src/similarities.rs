@@ -22,9 +22,9 @@ extern crate frequency;
 extern crate frequency_hashmap;
 
 use std::io;
-use std::iter::FromIterator;
 use std::fs::File;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use frequency::Frequency;
 use frequency_hashmap::HashMapFrequency;
 
@@ -39,16 +39,15 @@ pub fn file_to_chunks(file: File) -> Vec<u64> {
 pub fn compute_file_frequencies(file: File) -> HashMapFrequency<u64> {
     let mut frequency_map: HashMapFrequency<u64> = HashMapFrequency::new();
 
+    // This is a roundabout way, because HashMapFrequency needs &u64
     file_to_chunks(file).into_iter().for_each(|e| frequency_map.increment(e));
 
     frequency_map
 }
 
-pub fn compute_document_frequencies(doc: Vec<u64>) -> HashMapFrequency<u64> {
-    let mut frequency_map: HashMapFrequency<u64> = HashMapFrequency::new();
-    frequency_map.extend(doc.into_iter());
-
-    frequency_map
+pub fn compute_document_frequencies(doc: &[u64]) -> HashMapFrequency<&u64> {
+    let hmf : HashMapFrequency<&u64> = doc.iter().collect();
+    hmf
 }
 
 pub fn compute_document_scores(file: File) -> HashMap<u64, f64> {
@@ -60,37 +59,60 @@ fn compute_scores_from_frequencies(freq_map: &HashMapFrequency<u64>) -> HashMap<
     freq_map.into_iter().map(|(k, v)| (*k, 1.0 + (*v as f64).log10())).collect()
 }
 
+#[derive(Clone, Debug)]
+pub struct Document {
+    pub file: String,
+    pub chunks: Vec<u64>,
+    pub digest: Vec<f64>
+}
+
+impl PartialEq for Document {
+    fn eq(&self, other: &Self) -> bool {
+        self.file == other.file
+    }
+}
+
+impl Eq for Document {}
+
+impl std::hash::Hash for Document {
+
+fn hash<H>(&self, h: &mut H) where H: std::hash::Hasher {
+        return self.file.hash(h)
+    }
+}
+
 pub struct DocumentCollection {
-    files: Vec<String>,
-    collection_digests: HashMapFrequency<u64>
+    files: HashMap<String, Document>,
+    collection_digests: HashMapFrequency<u64>,
 }
 
 impl DocumentCollection {
     pub fn new() -> DocumentCollection {
         DocumentCollection {
-            files: vec![],
+            files: HashMap::new(),
             collection_digests: HashMapFrequency::new()
         }
     }
 
-    pub fn add_file(&mut self, name: &str) -> io::Result<Vec<u64>> {
-        if !self.files.contains(&name.to_owned()) {
-            let file = File::open(name)?;
-            let chunks = file_to_chunks(file);
-            chunks.iter().for_each(|c| self.collection_digests.increment(*c));
-            self.files.push(name.to_string());
-            Ok(chunks)
-        } else {
-            let file = File::open(name)?;
-            let chunks = file_to_chunks(file);
-            Ok(chunks)
+    pub fn add_file(&mut self, name: &str) -> io::Result<&Document> {
+        match self.files.entry(name.to_string()) {
+            Entry::Occupied(o) => Ok(o.into_mut()),
+            Entry::Vacant(v) => {
+                let file = File::open(name)?;
+                let chunks = file_to_chunks(file);
+                for chunk in chunks.clone() {
+                    self.collection_digests.increment(chunk);
+                }
+                let doc = Document{ file: name.to_string(), chunks, digest: vec![]};
+                Ok(v.insert(doc))
+            }
         }
     }
 
     pub fn compute_digest(&mut self, name: &str) -> io::Result<Vec<f64>> {
         let file = File::open(name)?;
-        let document = file_to_chunks(file);
-        Ok(self.compute_document_digest(document))
+        let document: Vec<u64> = file_to_chunks(file);
+        Ok(self.compute_document_digest(&document))
     }
 
     fn compute_chunk_weight(&self, chunk: u64, frequency: usize) -> f64 {
@@ -101,12 +123,12 @@ impl DocumentCollection {
         doc_weight * chunk_weight
     }
 
-    pub fn compute_document_digest(&self, doc: Vec<u64>) -> Vec<f64> {
+    pub fn compute_document_digest(&self, doc: &[u64]) -> Vec<f64> {
         // The following is correct according to the paper
         // let frequencies = compute_document_frequencies(doc.clone());
         // doc.into_iter().map(|chunk| self.compute_chunk_weight(chunk, frequencies.count(&chunk))).collect()
         // This is correct according to my understanding of how TF/IDF works.
-        let hashed_doc: HashMapFrequency<&u64> = doc.iter().collect();
+        let hashed_doc = compute_document_frequencies(doc);
         return self.collection_digests.items()
             .map(|known_chunk| {self.compute_chunk_weight(*known_chunk, hashed_doc.count(&known_chunk))})
             .collect();
@@ -178,10 +200,10 @@ mod tests {
         let mut document_collection = DocumentCollection::new();
         let result = document_collection.add_file(&name);
         let expected_vec = construct_expected_vec();
-        assert_eq!(result.unwrap(), expected_vec);
-        assert!(document_collection.files.contains(&name));
+        assert_eq!(result.unwrap().chunks, expected_vec);
+        assert_eq!(document_collection.files[&name].file, name);
         let again_result = document_collection.add_file(&name);
-        assert_eq!(again_result.unwrap(), expected_vec);
+        assert_eq!(again_result.unwrap().chunks, expected_vec);
         assert!(!document_collection.collection_digests.is_empty());
         let doc_vector = document_collection.compute_digest(&name)?;
         assert_eq!(doc_vector.len(), 2);

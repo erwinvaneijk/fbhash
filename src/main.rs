@@ -25,13 +25,40 @@ extern crate pretty_assertions;
 #[macro_use]
 extern crate float_cmp;
 
-use std::io;
+use std::cell::RefCell;
+use ordered_float::OrderedFloat;
+use priority_queue::PriorityQueue;
+use walkdir::WalkDir;
 
 mod chunker;
 mod similarities;
 
+fn ranked_search<'a>(doc: &[f64], documents: &'a [similarities::Document], _: usize) -> Vec<&'a similarities::Document> {
+    let mut queue: PriorityQueue<&similarities::Document, OrderedFloat<f64>> = PriorityQueue::new();
+    documents.iter().map(|other_doc| (other_doc, similarities::cosine_similarity(&other_doc.digest, doc))).for_each(|(d, score)| { let _ = queue.push(d, OrderedFloat::from(score)); });
+    let mut v = queue.into_sorted_vec();
+    v.reverse();
+    v
+}
+
 fn main() {
-    let mut document_collection = similarities::DocumentCollection::new();
-    let files: Vec<String> = vec!["testdata/testfile_yes.bin".to_string(), "testdata/testfile_zero.bin".to_string()];
-    let _results = files.iter().map(|f| document_collection.add_file(f).unwrap());
+    let document_collection = RefCell::new(similarities::DocumentCollection::new());
+    let files: Vec<String> = WalkDir::new(".").follow_links(false).into_iter().map(|e| String::from(e.ok().unwrap().path().to_str().unwrap())).collect();
+    let mut results: Vec<similarities::Document> = Vec::new();
+    for file_name in files {
+        let mut dc = document_collection.borrow_mut();
+        let added_file = dc.add_file(&file_name);
+        match added_file {
+            Err(_) =>
+              println!("Ignoring file {}", file_name),
+            Ok(document) =>
+            {
+                println!("Adding document: {}", document.file);
+                results.push(document.clone())
+            }
+        }
+    }
+
+    let similarity_matches = ranked_search(&results[1].digest, &results, 2);
+    similarity_matches.iter().for_each(|sim| println!("{}", sim.file));
 }

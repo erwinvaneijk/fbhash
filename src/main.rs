@@ -25,40 +25,83 @@ extern crate pretty_assertions;
 #[macro_use]
 extern crate float_cmp;
 
+use std::path::Path;
+use std::fs::File;
+use std::io::prelude::*;
 use std::cell::RefCell;
-use ordered_float::OrderedFloat;
-use priority_queue::PriorityQueue;
-use walkdir::WalkDir;
+use walkdir::{WalkDir, DirEntry};
 
 mod chunker;
 mod similarities;
 
-fn ranked_search<'a>(doc: &[f64], documents: &'a [similarities::Document], _: usize) -> Vec<&'a similarities::Document> {
-    let mut queue: PriorityQueue<&similarities::Document, OrderedFloat<f64>> = PriorityQueue::new();
-    documents.iter().map(|other_doc| (other_doc, similarities::cosine_similarity(&other_doc.digest, doc))).for_each(|(d, score)| { let _ = queue.push(d, OrderedFloat::from(score)); });
-    let mut v = queue.into_sorted_vec();
-    v.reverse();
-    v
+fn is_file(entry: &DirEntry) -> bool {
+    entry.file_type().is_file()
 }
 
-fn main() {
+/*
+fn get_files_from_dir(start_path: &str) -> Vec<String> {
+    WalkDir::new(start_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| is_file(e))
+        .map(|e| String::from(e.ok().unwrap().path().to_str().unwrap()))
+        .collect()
+}
+*/
+
+fn get_files_from_dir(start_path: &str) -> Vec<String> {
+    WalkDir::new(start_path)
+        .follow_links(false)
+        .into_iter()
+        .map(|e| String::from(e.ok().unwrap().path().to_str().unwrap()))
+        .filter(|name| Path::new(name).is_file())
+        .collect()
+}
+
+
+fn main() -> std::io::Result<()> {
     let document_collection = RefCell::new(similarities::DocumentCollection::new());
-    let files: Vec<String> = WalkDir::new(".").follow_links(false).into_iter().map(|e| String::from(e.ok().unwrap().path().to_str().unwrap())).collect();
+    let files: Vec<String> = get_files_from_dir(".");
     let mut results: Vec<similarities::Document> = Vec::new();
-    for file_name in files {
+    for file_name in files.iter().take(100) {
         let mut dc = document_collection.borrow_mut();
+        println!("Processing: {}", file_name);
         let added_file = dc.add_file(&file_name);
         match added_file {
             Err(_) =>
               println!("Ignoring file {}", file_name),
             Ok(document) =>
             {
-                println!("Adding document: {}", document.file);
                 results.push(document.clone())
             }
         }
     }
 
-    let similarity_matches = ranked_search(&results[1].digest, &results, 2);
-    similarity_matches.iter().for_each(|sim| println!("{}", sim.file));
+    println!("Updating statistics");
+
+    let updated_results: Vec<similarities::Document> = results.iter().map(|doc| similarities::Document{file: doc.file.to_string(), chunks: doc.chunks.clone(), digest: document_collection.borrow().compute_document_digest(&doc.chunks)}).collect();
+
+    println!("Output to file");
+
+    // Now start serializing it to a json file.
+    let mut output = File::create("total.json")?;
+    for doc in updated_results {
+        output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
+        output.write_all(b"\n")?;
+    }
+    
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_files_from_path() {
+        let result = get_files_from_dir("testdata");
+        assert_eq!(result, vec!["testdata/testfile-zero.bin", "testdata/testfile-yes.bin", "testdata/testfile-zero-length"]);
+        assert_eq!(result.len(), 3);
+
+    }
 }

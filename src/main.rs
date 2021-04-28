@@ -24,7 +24,7 @@ extern crate pretty_assertions;
 #[cfg(test)]
 #[macro_use]
 extern crate float_cmp;
-#[cfg(test)]
+
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
@@ -70,6 +70,13 @@ fn main() -> std::io::Result<()> {
             Err(_) => println!("Ignoring file {}", file_name),
             Ok(document) => results.push(document.unwrap()),
         }
+    }
+
+    {
+        println!("Output the frequencies state");
+        let mut state_output = File::create("document_state.json")?;
+        let doc_ref: &similarities::DocumentCollection = &(document_collection.borrow());
+        state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
     }
 
     println!("Updating statistics");

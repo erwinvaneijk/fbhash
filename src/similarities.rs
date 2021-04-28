@@ -142,6 +142,13 @@ impl DocumentCollection {
         }
     }
 
+    pub fn exists_file(&self, name: &str) -> Option<DateTime<Utc>> {
+        match self.files.get(name) {
+            None => None,
+            Some(date) => Some(date.clone()),
+        }
+    }
+
     pub fn compute_digest(&self, name: &str) -> io::Result<Vec<f64>> {
         let file = File::open(name)?;
         let document: Vec<u64> = file_to_chunks(file);
@@ -314,12 +321,13 @@ mod tests {
         let expected_vec = construct_expected_vec();
         assert!(result.is_ok(), "We should get a document back.");
         let unpacked_result = result.unwrap();
-        assert_ne!(unpacked_result, None);
+        assert!(unpacked_result.is_some());
         assert_eq!(unpacked_result.unwrap().chunks, expected_vec);
         assert_eq!(
             Utc::now().trunc_subsecs(2),
             document_collection.files[&name].trunc_subsecs(2)
         );
+        assert!(document_collection.exists_file(&name).is_some());
         let again_result = document_collection.add_file(&name, None);
         assert!(again_result.is_ok(), "We should get the option back.");
         assert_eq!(again_result.unwrap(), None);

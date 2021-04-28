@@ -21,19 +21,19 @@
 extern crate frequency;
 extern crate frequency_hashmap;
 
-use serde::de::SeqAccess;
-use serde::de::Visitor;
-use priority_queue::PriorityQueue;
-use ordered_float::OrderedFloat;
-use std::io;
-use std::iter::FromIterator;
-use std::fs::File;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
+use chrono::{DateTime, Utc};
 use frequency::Frequency;
 use frequency_hashmap::HashMapFrequency;
-use serde::{Serialize, Deserialize};
-use serde::ser::{Serializer, SerializeMap};
+use hash_hasher::HashBuildHasher;
+use ordered_float::OrderedFloat;
+use priority_queue::PriorityQueue;
+use serde::Serializer;
+use serde::{Deserialize, Serialize};
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io;
 
 use crate::chunker::ChunkIterator;
 
@@ -47,13 +47,15 @@ pub fn compute_file_frequencies(file: File) -> HashMapFrequency<u64> {
     let mut frequency_map: HashMapFrequency<u64> = HashMapFrequency::new();
 
     // This is a roundabout way, because HashMapFrequency needs &u64
-    file_to_chunks(file).into_iter().for_each(|e| frequency_map.increment(e));
+    file_to_chunks(file)
+        .into_iter()
+        .for_each(|e| frequency_map.increment(e));
 
     frequency_map
 }
 
 pub fn compute_document_frequencies(doc: &[u64]) -> HashMapFrequency<&u64> {
-    let hmf : HashMapFrequency<&u64> = doc.iter().collect();
+    let hmf: HashMapFrequency<&u64> = doc.iter().collect();
     hmf
 }
 
@@ -63,14 +65,17 @@ pub fn compute_document_scores(file: File) -> HashMap<u64, f64> {
 }
 
 fn compute_scores_from_frequencies(freq_map: &HashMapFrequency<u64>) -> HashMap<u64, f64> {
-    freq_map.into_iter().map(|(k, v)| (*k, 1.0 + (*v as f64).log10())).collect()
+    freq_map
+        .into_iter()
+        .map(|(k, v)| (*k, 1.0 + (*v as f64).log10()))
+        .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
     pub file: String,
     pub chunks: Vec<u64>,
-    pub digest: Vec<f64>
+    pub digest: Vec<f64>,
 }
 
 impl PartialEq for Document {
@@ -82,29 +87,36 @@ impl PartialEq for Document {
 impl Eq for Document {}
 
 impl std::hash::Hash for Document {
-
-fn hash<H>(&self, h: &mut H) where H: std::hash::Hasher {
-        return self.file.hash(h)
+    fn hash<H>(&self, h: &mut H)
+    where
+        H: std::hash::Hasher,
+    {
+        return self.file.hash(h);
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DocumentCollection {
-    files: HashMap<String, Document>,
-    collection_digests: HashMap<u64, usize>,
+    files: BTreeMap<String, DateTime<Utc>>,
+    #[serde(serialize_with = "ordered_map")]
+    collection_digests: HashMap<u64, usize, HashBuildHasher>,
 }
 
 impl DocumentCollection {
     pub fn new() -> DocumentCollection {
         DocumentCollection {
-            files: HashMap::new(),
-            collection_digests: HashMap::new()
+            files: BTreeMap::new(),
+            collection_digests: HashMap::default(),
         }
     }
 
-    pub fn add_file(&mut self, name: &str) -> io::Result<&Document> {
+    pub fn add_file(
+        &mut self,
+        name: &str,
+        insert_time: Option<DateTime<Utc>>,
+    ) -> io::Result<Option<Document>> {
         match self.files.entry(name.to_string()) {
-            Entry::Occupied(o) => Ok(o.into_mut()),
+            Entry::Occupied(_) => Ok(None),
             Entry::Vacant(v) => {
                 let file = File::open(name)?;
                 let chunks = file_to_chunks(file);
@@ -112,8 +124,20 @@ impl DocumentCollection {
                     let entry = self.collection_digests.entry(chunk).or_default();
                     *entry += 1;
                 }
-                let doc = Document{ file: name.to_string(), chunks, digest: vec![]};
-                Ok(v.insert(doc))
+                let doc = Document {
+                    file: name.to_string(),
+                    chunks,
+                    digest: vec![],
+                };
+                // TODO:
+                // The following is rather ugly, but here to support proper testing, as we can't do a mock for
+                // the Utc::now below.
+                if insert_time.is_none() {
+                    v.insert(Utc::now());
+                } else {
+                    v.insert(insert_time.unwrap());
+                }
+                Ok(Some(doc))
             }
         }
     }
@@ -127,7 +151,11 @@ impl DocumentCollection {
     fn compute_chunk_weight(&self, chunk: u64, frequency: usize) -> f64 {
         let n = self.collection_digests.len() as f64;
         let count = *self.collection_digests.get(&chunk).unwrap() as f64;
-        let doc_weight = if count > 0.0 { (n/count).log10() } else { 1.0_f64 };
+        let doc_weight = if count > 0.0 {
+            (n / count).log10()
+        } else {
+            1.0_f64
+        };
         let chunk_weight = 1.0_f64 + (frequency as f64).log10();
         doc_weight * chunk_weight
     }
@@ -138,31 +166,71 @@ impl DocumentCollection {
         // doc.into_iter().map(|chunk| self.compute_chunk_weight(chunk, frequencies.count(&chunk))).collect()
         // This is correct according to my understanding of how TF/IDF works.
         let hashed_doc = compute_document_frequencies(doc);
-        return self.collection_digests.keys()
-            .map(|known_chunk| {self.compute_chunk_weight(*known_chunk, hashed_doc.count(&known_chunk))})
+        return self
+            .collection_digests
+            .keys()
+            .map(|known_chunk| {
+                self.compute_chunk_weight(*known_chunk, hashed_doc.count(&known_chunk))
+            })
             .collect();
     }
 }
 
 impl PartialEq for DocumentCollection {
     fn eq(&self, other: &Self) -> bool {
-        let ret: bool = self.files.iter().zip(other.files.iter()).fold(false, |sum, (a, b)| sum && (a == b));
-        ret
+        // First check if other contains the same files.
+        let ret: bool = self
+            .files
+            .iter()
+            .zip(other.files.iter())
+            .fold(true, |sum, (a, b)| sum && (a == b));
+        if ret {
+            // Now check if the contents of the digests is the same.
+            self.collection_digests
+                .iter()
+                .zip(other.collection_digests.iter())
+                .fold(true, |acc, (a, b)| acc && (a == b))
+        } else {
+            ret
+        }
     }
 }
 
 impl Eq for DocumentCollection {}
 
 impl std::hash::Hash for DocumentCollection {
-
-fn hash<H>(&self, h: &mut H) where H: std::hash::Hasher {
+    fn hash<H>(&self, h: &mut H)
+    where
+        H: std::hash::Hasher,
+    {
         self.files.iter().for_each(|file| file.hash(h));
-        self.collection_digests.iter().for_each(|(k,v)| { k.hash(h); v.hash(h); } )
+        self.collection_digests.iter().for_each(|(k, v)| {
+            k.hash(h);
+            v.hash(h);
+        })
     }
 }
+
+fn ordered_map<S>(
+    value: &HashMap<u64, usize, HashBuildHasher>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    //let ordered: BTreeMap<_, _> = value.iter().collect();
+    //ordered.serialize(serializer)
+    value.serialize(serializer)
+}
+
 pub fn ranked_search<'a>(doc: &[f64], documents: &'a [Document], _: usize) -> Vec<&'a Document> {
     let mut queue: PriorityQueue<&Document, OrderedFloat<f64>> = PriorityQueue::new();
-    documents.iter().map(|other_doc| (other_doc, cosine_similarity(&other_doc.digest, doc))).for_each(|(d, score)| { let _ = queue.push(d, OrderedFloat::from(score)); });
+    documents
+        .iter()
+        .map(|other_doc| (other_doc, cosine_similarity(&other_doc.digest, doc)))
+        .for_each(|(d, score)| {
+            let _ = queue.push(d, OrderedFloat::from(score));
+        });
     let mut v = queue.into_sorted_vec();
     v.reverse();
     v
@@ -170,7 +238,7 @@ pub fn ranked_search<'a>(doc: &[f64], documents: &'a [Document], _: usize) -> Ve
 
 pub fn cosine_similarity(vec1: &[f64], vec2: &[f64]) -> f64 {
     if vec1.is_empty() || vec2.is_empty() {
-        return if vec1.len() == vec1.len() { 0. } else {1.};
+        return if vec1.len() == vec1.len() { 0. } else { 1. };
     }
     let iter_a = vec1.iter();
     let iter_b = vec2.iter();
@@ -189,11 +257,12 @@ mod tests {
     use crate::similarities::compute_document_scores;
     use crate::similarities::compute_file_frequencies;
     use crate::similarities::cosine_similarity;
-    use std::io;
-    use std::fs::File;
+    use chrono::prelude::*;
+    use chrono::SubsecRound;
     use frequency::Frequency;
-    use serde_test::{Token, assert_tokens};
-    use serde_json;
+    use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
+    use std::fs::File;
+    use std::io;
 
     #[test]
     fn test_compute_document_frequencies() -> io::Result<()> {
@@ -218,27 +287,42 @@ mod tests {
             Some(score) => {
                 let expected_score: f64 = 1.0 + (253.0_f64).log10();
                 assert!(approx_eq!(f64, *score, expected_score, epsilon = 0.001))
-            },
-            None => panic!("This value should exist")
+            }
+            None => panic!("This value should exist"),
         }
 
         Ok(())
     }
 
     fn construct_expected_vec() -> Vec<u64> {
-        (0..506).map(|i|{ if i%2 == 0 {33279275454869446_u64} else {2879926931474365_u64} }).collect()
+        (0..506)
+            .map(|i| {
+                if i % 2 == 0 {
+                    33279275454869446_u64
+                } else {
+                    2879926931474365_u64
+                }
+            })
+            .collect()
     }
 
     #[test]
     fn test_document_collection() -> io::Result<()> {
         let name = String::from("testdata/testfile-yes.bin");
         let mut document_collection = DocumentCollection::new();
-        let result = document_collection.add_file(&name);
+        let result = document_collection.add_file(&name, None);
         let expected_vec = construct_expected_vec();
-        assert_eq!(result.unwrap().chunks, expected_vec);
-        assert_eq!(document_collection.files[&name].file, name);
-        let again_result = document_collection.add_file(&name);
-        assert_eq!(again_result.unwrap().chunks, expected_vec);
+        assert!(result.is_ok(), "We should get a document back.");
+        let unpacked_result = result.unwrap();
+        assert_ne!(unpacked_result, None);
+        assert_eq!(unpacked_result.unwrap().chunks, expected_vec);
+        assert_eq!(
+            Utc::now().trunc_subsecs(2),
+            document_collection.files[&name].trunc_subsecs(2)
+        );
+        let again_result = document_collection.add_file(&name, None);
+        assert!(again_result.is_ok(), "We should get the option back.");
+        assert_eq!(again_result.unwrap(), None);
         assert!(!document_collection.collection_digests.is_empty());
         let doc_vector = document_collection.compute_digest(&name)?;
         assert_eq!(doc_vector.len(), 2);
@@ -249,285 +333,561 @@ mod tests {
     fn test_cosine_distance() {
         let vec1 = vec![0.0, 0.1, 0.2];
         let vec2 = vec![0.0, -0.1, -0.2];
-        assert!(approx_eq!(f64, cosine_similarity(&vec1, &vec1), 1.0_f64, ulps=2));
-        assert!(approx_eq!(f64, cosine_similarity(&vec1, &vec2), -1.0_f64, ulps=2))
+        assert!(approx_eq!(
+            f64,
+            cosine_similarity(&vec1, &vec1),
+            1.0_f64,
+            ulps = 2
+        ));
+        assert!(approx_eq!(
+            f64,
+            cosine_similarity(&vec1, &vec2),
+            -1.0_f64,
+            ulps = 2
+        ))
     }
 
     #[test]
     fn test_serialization_of_document() -> io::Result<()> {
         let name = String::from("testdata/testfile-yes.bin");
         let mut document_collection = DocumentCollection::new();
-        let chunks = document_collection.add_file(&name)?.chunks.clone();
+        let chunks = document_collection
+            .add_file(&name, None)?
+            .unwrap()
+            .chunks
+            .clone();
         let doc_vector = document_collection.compute_digest(&name)?;
-        let doc = Document{ file: name, chunks, digest: doc_vector};
-        
-        assert_tokens(&doc, &[
-            Token::Struct {name: "Document", len: 3},
-            Token::String("file"),
-            Token::String("testdata/testfile-yes.bin"),
-            Token::String("chunks"),
-            Token::Seq {len: Some(506)}, 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-            Token::SeqEnd,
-            Token::Str("digest"),
-            Token::Seq{ len : Some(2)},
+        let doc = Document {
+            file: name,
+            chunks,
+            digest: doc_vector,
+        };
+
+        assert_tokens(
+            &doc,
+            &[
+                Token::Struct {
+                    name: "Document",
+                    len: 3,
+                },
+                Token::String("file"),
+                Token::String("testdata/testfile-yes.bin"),
+                Token::String("chunks"),
+                Token::Seq { len: Some(506) },
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::U64(33279275454869446),
+                Token::U64(2879926931474365),
+                Token::SeqEnd,
+                Token::Str("digest"),
+                Token::Seq { len: Some(2) },
                 Token::F64(-7.153667404738591),
                 Token::F64(-7.153667404738591),
-            Token::SeqEnd,
-            Token::StructEnd
-        ]
+                Token::SeqEnd,
+                Token::StructEnd,
+            ],
         );
 
         Ok(())
@@ -536,286 +896,66 @@ mod tests {
     #[test]
     fn test_serialization_document_set_state() {
         let names = vec!["testdata/testfile-yes.bin", "testdata/testfile-zero.bin"];
+        let late = Utc.ymd(2020, 6, 5).and_hms(9, 32, 33);
         let mut document_collection = DocumentCollection::new();
-        let _ = document_collection.add_file(names[0]);
-        let _ = document_collection.add_file(names[1]);
+        let _ = document_collection.add_file(names[0], Some(late));
+        let _ = document_collection.add_file(names[1], Some(late));
 
-        assert_tokens(&document_collection, &[
-            Token::Struct {name: "DocumentCollection", len: 2},
-            Token::String("files"),
-            Token::Map{ len: Some(2)},
-            Token::String("testdata/testfile-yes.bin"),
-            Token::Struct { name: "Document", len: 3},
-            Token::String("file"),
-            Token::String("testdata/testfile-yes.bin"),
-            Token::String("chunks"),
-            Token::Seq {len: Some(506)}, 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-                Token::U64(33279275454869446), Token::U64(2879926931474365), 
-            Token::SeqEnd,
-            Token::Str("digest"),
-            Token::Seq{ len : Some(2)},
-                Token::F64(-7.153667404738591),
-                Token::F64(-7.153667404738591),
-            Token::SeqEnd,
-            Token::StructEnd,
-            Token::String("testdata/testfile-zero.bin"),
-            Token::Struct { name: "Document", len: 3},
-            Token::StructEnd,
-            Token::MapEnd,
-            Token::StructEnd
-
-        ]);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&document_collection).unwrap()
+        );
+        assert_ser_tokens(
+            &document_collection,
+            &[
+                Token::Struct {
+                    name: "DocumentCollection",
+                    len: 2,
+                },
+                Token::String("files"),
+                Token::Map { len: Some(2) },
+                Token::String("testdata/testfile-yes.bin"),
+                Token::String("2020-06-05T09:32:33Z"),
+                Token::String("testdata/testfile-zero.bin"),
+                Token::String("2020-06-05T09:32:33Z"),
+                Token::MapEnd,
+                Token::Str("collection_digests"),
+                Token::Map { len: Some(3) },
+                Token::U64(33279275454869446),
+                Token::U64(253),
+                Token::U64(2879926931474365),
+                Token::U64(253),
+                Token::U64(0),
+                Token::U64(506),
+                Token::MapEnd,
+                Token::StructEnd,
+            ],
+        );
+        assert_de_tokens(
+            &document_collection,
+            &[
+                Token::Struct {
+                    name: "DocumentCollection",
+                    len: 2,
+                },
+                Token::String("files"),
+                Token::Map { len: Some(2) },
+                Token::String("testdata/testfile-yes.bin"),
+                Token::String("2020-06-05T09:32:33Z"),
+                Token::String("testdata/testfile-zero.bin"),
+                Token::String("2020-06-05T09:32:33Z"),
+                Token::MapEnd,
+                Token::Str("collection_digests"),
+                Token::Map { len: Some(3) },
+                Token::U64(33279275454869446),
+                Token::U64(253),
+                Token::U64(2879926931474365),
+                Token::U64(253),
+                Token::U64(0),
+                Token::U64(506),
+                Token::MapEnd,
+                Token::StructEnd,
+            ],
+        );
     }
 }

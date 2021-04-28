@@ -24,12 +24,12 @@ extern crate pretty_assertions;
 #[cfg(test)]
 #[macro_use]
 extern crate float_cmp;
-
-use std::path::Path;
+#[cfg(test)]
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
-use std::cell::RefCell;
-use walkdir::{WalkDir, DirEntry};
+use std::path::Path;
+use walkdir::{DirEntry, WalkDir};
 
 mod chunker;
 mod similarities;
@@ -58,7 +58,6 @@ fn get_files_from_dir(start_path: &str) -> Vec<String> {
         .collect()
 }
 
-
 fn main() -> std::io::Result<()> {
     let document_collection = RefCell::new(similarities::DocumentCollection::new());
     let files: Vec<String> = get_files_from_dir(".");
@@ -66,20 +65,25 @@ fn main() -> std::io::Result<()> {
     for file_name in files.iter().take(100) {
         let mut dc = document_collection.borrow_mut();
         println!("Processing: {}", file_name);
-        let added_file = dc.add_file(&file_name);
+        let added_file = dc.add_file(&file_name, None);
         match added_file {
-            Err(_) =>
-              println!("Ignoring file {}", file_name),
-            Ok(document) =>
-            {
-                results.push(document.clone())
-            }
+            Err(_) => println!("Ignoring file {}", file_name),
+            Ok(document) => results.push(document.unwrap()),
         }
     }
 
     println!("Updating statistics");
 
-    let updated_results: Vec<similarities::Document> = results.iter().map(|doc| similarities::Document{file: doc.file.to_string(), chunks: doc.chunks.clone(), digest: document_collection.borrow().compute_document_digest(&doc.chunks)}).collect();
+    let updated_results: Vec<similarities::Document> = results
+        .iter()
+        .map(|doc| similarities::Document {
+            file: doc.file.to_string(),
+            chunks: doc.chunks.clone(),
+            digest: document_collection
+                .borrow()
+                .compute_document_digest(&doc.chunks),
+        })
+        .collect();
 
     println!("Output to file");
 
@@ -89,7 +93,6 @@ fn main() -> std::io::Result<()> {
         output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
         output.write_all(b"\n")?;
     }
-    
     Ok(())
 }
 
@@ -98,10 +101,32 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_get_files_from_path() {
         let result = get_files_from_dir("testdata");
-        assert_eq!(result, vec!["testdata/testfile-zero.bin", "testdata/testfile-yes.bin", "testdata/testfile-zero-length"]);
+        assert_eq!(
+            result,
+            vec![
+                "testdata/testfile-zero.bin",
+                "testdata/testfile-yes.bin",
+                "testdata/testfile-zero-length"
+            ]
+        );
         assert_eq!(result.len(), 3);
+    }
 
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_get_files_from_path() {
+        let result = get_files_from_dir("testdata");
+        assert_eq!(
+            result,
+            vec![
+                "testdata\\testfile-yes.bin",
+                "testdata\\testfile-zero-length",
+                "testdata\\testfile-zero.bin",
+            ]
+        );
+        assert_eq!(result.len(), 3);
     }
 }

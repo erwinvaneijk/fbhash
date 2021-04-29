@@ -107,33 +107,45 @@ fn main() -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    fn eq_lists<T>(a: &[T], b: &[T]) -> bool
+    where
+        T: PartialEq + Ord,
+    {
+        let mut a: Vec<_> = a.iter().collect();
+        let mut b: Vec<_> = b.iter().collect();
+        a.sort();
+        b.sort();
+
+        a == b
+    }
+
     #[test]
     #[cfg(not(target_os = "windows"))]
     fn test_get_files_from_path() {
         let result = get_files_from_dir("testdata");
-        assert_eq!(
-            vec![
-                "testdata/testfile-zero-length",
-                "testdata/testfile-yes.bin",
-                "testdata/testfile-zero.bin",
+        assert!(eq_lists(
+            &[
+                String::from("testdata/testfile-zero-length"),
+                String::from("testdata/testfile-yes.bin"),
+                String::from("testdata/testfile-zero.bin"),
             ],
-            result
-        );
+            &result[..]
+        ));
         assert_eq!(result.len(), 3);
     }
 
     #[test]
     #[cfg(target_os = "windows")]
     fn test_get_files_from_path() {
-        let result = get_files_from_dir("testdata");
-        assert_eq!(
-            result,
-            vec![
-                "testdata\\testfile-yes.bin",
-                "testdata\\testfile-zero-length",
-                "testdata\\testfile-zero.bin",
-            ]
-        );
+        let result: Vec<String> = get_files_from_dir("testdata");
+        assert!(eq_lists(
+            &[
+                String::from("testdata\\testfile-yes.bin"),
+                String::from("testdata\\testfile-zero-length"),
+                String::from("testdata\\testfile-zero.bin"),
+            ],
+            &result[..]
+        ));
         assert_eq!(result.len(), 3);
     }
 }

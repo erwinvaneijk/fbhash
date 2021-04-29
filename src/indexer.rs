@@ -29,25 +29,10 @@ use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 mod chunker;
 mod similarities;
-
-fn is_file(entry: &DirEntry) -> bool {
-    entry.file_type().is_file()
-}
-
-/*
-fn get_files_from_dir(start_path: &str) -> Vec<String> {
-    WalkDir::new(start_path)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| is_file(e))
-        .map(|e| String::from(e.ok().unwrap().path().to_str().unwrap()))
-        .collect()
-}
-*/
 
 fn get_files_from_dir(start_path: &str) -> Vec<String> {
     WalkDir::new(start_path)
@@ -65,7 +50,7 @@ fn main() -> std::io::Result<()> {
     for file_name in files.iter().take(100) {
         let mut dc = document_collection.borrow_mut();
         println!("Processing: {}", file_name);
-        let added_file = dc.add_file(&file_name, None);
+        let added_file = dc.add_file(&file_name);
         match added_file {
             Err(_) => println!("Ignoring file {}", file_name),
             Ok(document) => results.push(document.unwrap()),
@@ -107,6 +92,8 @@ fn main() -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    // TODO:
+    //   Move this to a separate testing toolkit?
     fn eq_lists<T>(a: &[T], b: &[T]) -> bool
     where
         T: PartialEq + Ord,

@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "digital forensics"]
 
 [[bin]]
 name = "fbhash_indexer"
-path = "src/main.rs"
+path = "src/indexer.rs"
 
 [[bin]]
 name = "fbhash_query"

@@ -21,16 +21,13 @@
 extern crate frequency;
 extern crate frequency_hashmap;
 
-use chrono::{DateTime, Utc};
 use frequency::Frequency;
 use frequency_hashmap::HashMapFrequency;
 use hash_hasher::HashBuildHasher;
 use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
-use serde::Serializer;
 use serde::{Deserialize, Serialize};
-use std::collections::btree_map::Entry;
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
@@ -97,62 +94,46 @@ impl std::hash::Hash for Document {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DocumentCollection {
-    files: BTreeMap<String, DateTime<Utc>>,
+    files: BTreeSet<String>,
     // Ordering is important, as it determines the order of the digests that
     // are created for the file contents.
     // Using HashBuildHasher enables that insertion order stays the same.
     // TODO:
-    // Determine if it's more beneficial to replace it with a strictly ordered datastructure
+    // Determine if it's more beneficial to replace it with a strictly ordered data structure
     // in the first place, and take the overhead as a calculated downside.
-    #[serde(serialize_with = "ordered_map")]
     collection_digests: HashMap<u64, usize, HashBuildHasher>,
 }
 
 impl DocumentCollection {
     pub fn new() -> DocumentCollection {
         DocumentCollection {
-            files: BTreeMap::new(),
+            files: BTreeSet::new(),
             collection_digests: HashMap::default(),
         }
     }
 
-    pub fn add_file(
-        &mut self,
-        name: &str,
-        insert_time: Option<DateTime<Utc>>,
-    ) -> io::Result<Option<Document>> {
-        match self.files.entry(name.to_string()) {
-            Entry::Occupied(_) => Ok(None),
-            Entry::Vacant(v) => {
-                let file = File::open(name)?;
-                let chunks = file_to_chunks(file);
-                for chunk in chunks.clone() {
-                    let entry = self.collection_digests.entry(chunk).or_default();
-                    *entry += 1;
-                }
-                let doc = Document {
-                    file: name.to_string(),
-                    chunks,
-                    digest: vec![],
-                };
-                // TODO:
-                // The following is rather ugly, but here to support proper testing, as we can't do a mock for
-                // the Utc::now below.
-                if insert_time.is_none() {
-                    v.insert(Utc::now());
-                } else {
-                    v.insert(insert_time.unwrap());
-                }
-                Ok(Some(doc))
+    pub fn add_file(&mut self, name: &str) -> io::Result<Option<Document>> {
+        if !self.files.contains(name) {
+            let file = File::open(name)?;
+            let chunks = file_to_chunks(file);
+            for chunk in chunks.clone() {
+                let entry = self.collection_digests.entry(chunk).or_default();
+                *entry += 1;
             }
+            let doc = Document {
+                file: name.to_string(),
+                chunks,
+                digest: vec![],
+            };
+            self.files.insert(name.to_string());
+            Ok(Some(doc))
+        } else {
+            Ok(None)
         }
     }
 
-    pub fn exists_file(&self, name: &str) -> Option<DateTime<Utc>> {
-        match self.files.get(name) {
-            None => None,
-            Some(date) => Some(date.clone()),
-        }
+    pub fn exists_file(&self, name: &str) -> bool {
+        self.files.contains(name)
     }
 
     pub fn compute_digest(&self, name: &str) -> io::Result<Vec<f64>> {
@@ -224,18 +205,6 @@ impl std::hash::Hash for DocumentCollection {
     }
 }
 
-fn ordered_map<S>(
-    value: &HashMap<u64, usize, HashBuildHasher>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    //let ordered: BTreeMap<_, _> = value.iter().collect();
-    //ordered.serialize(serializer)
-    value.serialize(serializer)
-}
-
 pub fn ranked_search<'a>(doc: &[f64], documents: &'a [Document], _: usize) -> Vec<&'a Document> {
     let mut queue: PriorityQueue<&Document, OrderedFloat<f64>> = PriorityQueue::new();
     documents
@@ -270,8 +239,6 @@ mod tests {
     use crate::similarities::compute_document_scores;
     use crate::similarities::compute_file_frequencies;
     use crate::similarities::cosine_similarity;
-    use chrono::prelude::*;
-    use chrono::SubsecRound;
     use frequency::Frequency;
     use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
     use std::fs::File;
@@ -323,18 +290,14 @@ mod tests {
     fn test_document_collection() -> io::Result<()> {
         let name = String::from("testdata/testfile-yes.bin");
         let mut document_collection = DocumentCollection::new();
-        let result = document_collection.add_file(&name, None);
+        let result = document_collection.add_file(&name);
         let expected_vec = construct_expected_vec();
         assert!(result.is_ok(), "We should get a document back.");
         let unpacked_result = result.unwrap();
         assert!(unpacked_result.is_some());
         assert_eq!(unpacked_result.unwrap().chunks, expected_vec);
-        assert_eq!(
-            Utc::now().trunc_subsecs(2),
-            document_collection.files[&name].trunc_subsecs(2)
-        );
-        assert!(document_collection.exists_file(&name).is_some());
-        let again_result = document_collection.add_file(&name, None);
+        assert!(document_collection.exists_file(&name));
+        let again_result = document_collection.add_file(&name);
         assert!(again_result.is_ok(), "We should get the option back.");
         assert_eq!(again_result.unwrap(), None);
         assert!(!document_collection.collection_digests.is_empty());
@@ -365,11 +328,7 @@ mod tests {
     fn test_serialization_of_document() -> io::Result<()> {
         let name = String::from("testdata/testfile-yes.bin");
         let mut document_collection = DocumentCollection::new();
-        let chunks = document_collection
-            .add_file(&name, None)?
-            .unwrap()
-            .chunks
-            .clone();
+        let chunks = document_collection.add_file(&name)?.unwrap().chunks.clone();
         let doc_vector = document_collection.compute_digest(&name)?;
         let doc = Document {
             file: name,
@@ -910,10 +869,9 @@ mod tests {
     #[test]
     fn test_serialization_document_set_state() {
         let names = vec!["testdata/testfile-yes.bin", "testdata/testfile-zero.bin"];
-        let late = Utc.ymd(2020, 6, 5).and_hms(9, 32, 33);
         let mut document_collection = DocumentCollection::new();
-        let _ = document_collection.add_file(names[0], Some(late));
-        let _ = document_collection.add_file(names[1], Some(late));
+        let _ = document_collection.add_file(names[0]);
+        let _ = document_collection.add_file(names[1]);
 
         println!(
             "{}",
@@ -927,12 +885,10 @@ mod tests {
                     len: 2,
                 },
                 Token::String("files"),
-                Token::Map { len: Some(2) },
+                Token::Seq { len: Some(2) },
                 Token::String("testdata/testfile-yes.bin"),
-                Token::String("2020-06-05T09:32:33Z"),
                 Token::String("testdata/testfile-zero.bin"),
-                Token::String("2020-06-05T09:32:33Z"),
-                Token::MapEnd,
+                Token::SeqEnd,
                 Token::Str("collection_digests"),
                 Token::Map { len: Some(3) },
                 Token::U64(33279275454869446),
@@ -953,12 +909,10 @@ mod tests {
                     len: 2,
                 },
                 Token::String("files"),
-                Token::Map { len: Some(2) },
+                Token::Seq { len: Some(2) },
                 Token::String("testdata/testfile-yes.bin"),
-                Token::String("2020-06-05T09:32:33Z"),
                 Token::String("testdata/testfile-zero.bin"),
-                Token::String("2020-06-05T09:32:33Z"),
-                Token::MapEnd,
+                Token::SeqEnd,
                 Token::Str("collection_digests"),
                 Token::Map { len: Some(3) },
                 Token::U64(33279275454869446),

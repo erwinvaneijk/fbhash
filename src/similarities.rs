@@ -98,6 +98,12 @@ impl std::hash::Hash for Document {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DocumentCollection {
     files: BTreeMap<String, DateTime<Utc>>,
+    // Ordering is important, as it determines the order of the digests that
+    // are created for the file contents.
+    // Using HashBuildHasher enables that insertion order stays the same.
+    // TODO:
+    // Determine if it's more beneficial to replace it with a strictly ordered datastructure
+    // in the first place, and take the overhead as a calculated downside.
     #[serde(serialize_with = "ordered_map")]
     collection_digests: HashMap<u64, usize, HashBuildHasher>,
 }

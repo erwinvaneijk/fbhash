@@ -112,12 +112,12 @@ mod tests {
     fn test_get_files_from_path() {
         let result = get_files_from_dir("testdata");
         assert_eq!(
-            result,
             vec![
-                "testdata/testfile-zero.bin",
+                "testdata/testfile-zero-length",
                 "testdata/testfile-yes.bin",
-                "testdata/testfile-zero-length"
-            ]
+                "testdata/testfile-zero.bin",
+            ],
+            result
         );
         assert_eq!(result.len(), 3);
     }

@@ -22,13 +22,13 @@ use std::fs::File;
 use std::io::Read;
 
 const CHUNK_SIZE: usize = 7;
-const A : u64 = 255;
+const A: u64 = 255;
 const MODULUS: u64 = 801385653117583579;
 
 #[derive(Clone, Debug, Copy)]
 pub struct Chunk {
     pub number: usize,
-    pub digest: u64
+    pub digest: u64,
 }
 
 #[derive(Debug)]
@@ -40,10 +40,10 @@ pub struct ChunkContent {
 
 impl ChunkContent {
     pub fn new() -> ChunkContent {
-        ChunkContent{
+        ChunkContent {
             current_number: 0,
             content: vec![0; CHUNK_SIZE],
-            max_a: A.pow(CHUNK_SIZE as u32)
+            max_a: A.pow(CHUNK_SIZE as u32),
         }
     }
 
@@ -52,7 +52,10 @@ impl ChunkContent {
     //
     pub fn setup(&mut self, v: &[u8]) -> Chunk {
         self.content.copy_from_slice(v);
-        Chunk{number: self.current_number, digest: self.compute_digest()}
+        Chunk {
+            number: self.current_number,
+            digest: self.compute_digest(),
+        }
     }
 
     /*
@@ -71,7 +74,10 @@ impl ChunkContent {
         self.content[CHUNK_SIZE - 1] = new_byte;
         self.current_number += 1;
         let new_digest = self.rehash_digest(previous, first_byte, new_byte);
-        Chunk{number: self.current_number, digest: new_digest}
+        Chunk {
+            number: self.current_number,
+            digest: new_digest,
+        }
     }
 
     fn rehash_digest(&mut self, digest: u64, old_byte: u8, new_byte: u8) -> u64 {
@@ -83,7 +89,7 @@ impl ChunkContent {
 
     fn compute_digest(&mut self) -> u64 {
         let mut h = 0;
-        let mut k : u32 = CHUNK_SIZE as u32;
+        let mut k: u32 = CHUNK_SIZE as u32;
         for e in &self.content {
             let elem = *e as u64;
             h = (h + elem * A.pow(k - 1)) % MODULUS;
@@ -98,15 +104,15 @@ pub struct ChunkIterator {
     file: File,
     chunk_content: ChunkContent,
     // The option is None when not yet completed
-    last_chunk: Option<Chunk>
+    last_chunk: Option<Chunk>,
 }
 
 impl ChunkIterator {
     pub fn new(file: File) -> ChunkIterator {
-        ChunkIterator{
+        ChunkIterator {
             file,
             chunk_content: ChunkContent::new(),
-            last_chunk: None
+            last_chunk: None,
         }
     }
 }
@@ -114,22 +120,19 @@ impl ChunkIterator {
 impl Iterator for ChunkIterator {
     type Item = Chunk;
 
-    fn next(& mut self) -> Option<Chunk> {
+    fn next(&mut self) -> Option<Chunk> {
         match self.last_chunk {
-            None =>
-            {
+            None => {
                 let mut initial_content = vec![0; CHUNK_SIZE];
                 match self.file.read(&mut initial_content) {
-                    Err(_) =>
-                        None,
-                    Ok(_) =>
-                    {
+                    Err(_) => None,
+                    Ok(_) => {
                         let chunk = self.chunk_content.setup(&initial_content);
                         self.last_chunk = Some(chunk);
                         Some(chunk)
                     }
                 }
-            },
+            }
             Some(_) => {
                 let mut b: Vec<u8> = vec![1];
                 match self.file.read(&mut b) {
@@ -141,8 +144,7 @@ impl Iterator for ChunkIterator {
                         //let new_value = self.chunk_content.update(0, b[0]);
                         Some(new_value)
                     }
-                    Err(_) =>
-                        None
+                    Err(_) => None,
                 }
             }
         }
@@ -152,8 +154,8 @@ impl Iterator for ChunkIterator {
 #[cfg(test)]
 mod tests {
     use super::ChunkIterator;
-    use std::io;
     use std::fs::File;
+    use std::io;
 
     #[test]
     fn test_litmus() {
@@ -228,7 +230,7 @@ mod tests {
         assert_eq!(chunks.len(), 512 - 6);
         for (i, chunk) in chunks.iter().enumerate() {
             assert_eq!(chunk.number, i);
-            if i%2 == 0 {
+            if i % 2 == 0 {
                 assert_eq!(chunk.digest, 33279275454869446);
             } else {
                 assert_eq!(chunk.digest, 2879926931474365);

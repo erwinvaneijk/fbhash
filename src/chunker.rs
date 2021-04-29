@@ -39,6 +39,7 @@ pub struct ChunkContent {
 }
 
 impl ChunkContent {
+    #[allow(dead_code)]
     pub fn new() -> ChunkContent {
         ChunkContent {
             current_number: 0,
@@ -60,12 +61,6 @@ impl ChunkContent {
 
     /*
      * Compute the new digest, starting with previous.
-     *
-     * Current implementation computes too much, but works for now.
-     * TODO:
-     *   Speed this up because we can compute the new digest by subtracting
-     *   the first byte's formula from the digest and adding the last bytes formula
-     *   to the new digest.
      */
     pub fn update(&mut self, previous: u64, new_byte: u8) -> Chunk {
         // Shift everything one byte to the left
@@ -108,6 +103,7 @@ pub struct ChunkIterator {
 }
 
 impl ChunkIterator {
+    #[allow(dead_code)]
     pub fn new(file: File) -> ChunkIterator {
         ChunkIterator {
             file,

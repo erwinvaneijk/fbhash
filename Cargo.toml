@@ -25,10 +25,9 @@ itertools = "0.10.0"
 frequency = "^1.0.0"
 frequency-hashmap = "^1.0.0"
 chrono = { version = "0.4.19", features = ["serde"] }
-ordered-float = "2.0"
-priority-queue = "1.1.1"
 walkdir = "2"
 serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8.17"
 serde_json = "1.0"
 hash_hasher = "2.0"
 clap = "2.33.3"

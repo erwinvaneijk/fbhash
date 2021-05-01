@@ -26,10 +26,9 @@ extern crate pretty_assertions;
 extern crate float_cmp;
 mod fbhash;
 
+use clap::{App, Arg, SubCommand};
 use fbhash::index::*;
 use fbhash::query::*;
-use clap::{App, Arg, SubCommand};
-
 
 fn main() -> std::io::Result<()> {
     let matches = App::new("fbhash")
@@ -39,48 +38,60 @@ fn main() -> std::io::Result<()> {
         .subcommand(
             SubCommand::with_name("index")
                 .arg(
-                    Arg::with_name("INPUT ...")
+                    Arg::with_name("INPUT")
                         .required(true)
                         .index(1)
                         .help("Path to directories to process")
                         .multiple(true),
                 )
                 .arg(
-                    Arg::with_name("output_index")
+                    Arg::with_name("STATE_FILE")
                         .short("o")
-                        .value_name("INDEX_FILE")
+                        .value_name("STATE_FILE")
                         .takes_value(true),
                 )
                 .arg(
-                    Arg::with_name("results_file")
-                        .short("r")
-                        .value_name("RESULTS_FILE")
+                    Arg::with_name("DATABASE_FILE")
+                        .long("database")
+                        .require_equals(true)
+                        .short("d")
+                        .value_name("DATABASE_FILE")
                         .takes_value(true),
-                ),)
-            .subcommand(SubCommand::with_name("query")
-                        .arg(
-                            Arg::with_name("RESULT_SIZE")
-                                .short("n")
-                                .long("number")
-                                .required(false)
-                                .require_equals(true)
-                                .help("How many results to return")
-                                .takes_value(true)
-                        )
-                        .arg(
-                            Arg::with_name("FILE_TO_QUERY")
-                                .required(true)
-                                .help("The file to query in the index")
-                                .index(2)
-                                .required(true)
-                                .multiple(true))
-                        .arg(
-                            Arg::with_name("INDEX_FILE")
-                                .required(true)
-                                .help("The index to query against")
-                                .index(1)
-                        )
-            )
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("query")
+                .arg(
+                    Arg::with_name("RESULT_SIZE")
+                        .short("n")
+                        .long("number")
+                        .required(false)
+                        .require_equals(true)
+                        .help("How many results to return")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("DATABASE_FILE")
+                        .required(true)
+                        .help("The database file to query against")
+                        .index(1),
+                )
+                .arg(
+                    Arg::with_name("STATE_FILE")
+                        .required(true)
+                        .help("The file containing the frequency states.")
+                        .index(2)
+                        .required(true),
+                )
+                .arg(
+                    Arg::with_name("FILE_TO_QUERY")
+                        .required(true)
+                        .help("The file to query in the index")
+                        .index(3)
+                        .required(true)
+                        .multiple(true),
+                ),
+        )
         .get_matches();
 
     if let Some(subcommand_matches) = matches.subcommand_matches("index") {
@@ -89,21 +100,29 @@ fn main() -> std::io::Result<()> {
             .value_of("STATE_FILE")
             .unwrap_or("collection_state.json");
         let results_file = subcommand_matches
-            .value_of("RESULTS_FILE")
-            .unwrap_or("results.json");
+            .value_of("DATABASE_FILE")
+            .unwrap_or("database.json");
 
         index_paths(&paths, output_state_file, results_file)?;
     } else if let Some(query_subcommand_matches) = matches.subcommand_matches("query") {
-        let files: Vec<_> = query_subcommand_matches.values_of("FILE_TO_QUERY").unwrap().collect();
-        let index_path = query_subcommand_matches.value_of("INDEX_FILE").unwrap();
-        let number_of_results_str = query_subcommand_matches.value_of("RESULT_SIZE").unwrap_or("5");
+        let files: Vec<_> = query_subcommand_matches
+            .values_of("FILE_TO_QUERY")
+            .unwrap()
+            .collect();
+        let database_path = query_subcommand_matches.value_of("DATABASE_FILE").unwrap();
+        let state_path = query_subcommand_matches.value_of("STATE_FILE").unwrap();
+        let number_of_results_str = query_subcommand_matches
+            .value_of("RESULT_SIZE")
+            .unwrap_or("5");
         match number_of_results_str.parse::<usize>() {
-            Err(v) =>
-                panic!("Not a valid numerical value found for result_size argument {}", v),
-            Ok(number_of_results) =>
-                query_for_results(index_path, &files, number_of_results),
+            Err(v) => panic!(
+                "Not a valid numerical value found for result_size argument {}",
+                v
+            ),
+            Ok(number_of_results) => {
+                query_for_results(state_path, database_path, &files, number_of_results)?
+            }
         }
     }
     Ok(())
 }
-

@@ -24,8 +24,6 @@ extern crate frequency_hashmap;
 use frequency::Frequency;
 use frequency_hashmap::HashMapFrequency;
 use hash_hasher::HashBuildHasher;
-use ordered_float::OrderedFloat;
-use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -33,6 +31,7 @@ use std::fs::File;
 use std::io;
 
 use crate::fbhash::chunker::ChunkIterator;
+use crate::fbhash::heap::Heap;
 
 pub fn file_to_chunks(file: File) -> Vec<u64> {
     let chunk_iterator = ChunkIterator::new(file);
@@ -40,32 +39,9 @@ pub fn file_to_chunks(file: File) -> Vec<u64> {
     chunks
 }
 
-pub fn compute_file_frequencies(file: File) -> HashMapFrequency<u64> {
-    let mut frequency_map: HashMapFrequency<u64> = HashMapFrequency::new();
-
-    // This is a roundabout way, because HashMapFrequency needs &u64
-    file_to_chunks(file)
-        .into_iter()
-        .for_each(|e| frequency_map.increment(e));
-
-    frequency_map
-}
-
 pub fn compute_document_frequencies(doc: &[u64]) -> HashMapFrequency<&u64> {
     let hmf: HashMapFrequency<&u64> = doc.iter().collect();
     hmf
-}
-
-pub fn compute_document_scores(file: File) -> HashMap<u64, f64> {
-    let frequencies = compute_file_frequencies(file);
-    compute_scores_from_frequencies(&frequencies)
-}
-
-fn compute_scores_from_frequencies(freq_map: &HashMapFrequency<u64>) -> HashMap<u64, f64> {
-    freq_map
-        .into_iter()
-        .map(|(k, v)| (*k, 1.0 + (*v as f64).log10()))
-        .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -88,7 +64,7 @@ impl std::hash::Hash for Document {
     where
         H: std::hash::Hasher,
     {
-        return self.file.hash(h);
+        self.file.hash(h);
     }
 }
 
@@ -113,7 +89,7 @@ impl DocumentCollection {
     }
 
     pub fn add_file(&mut self, name: &str) -> io::Result<Option<Document>> {
-        if !self.files.contains(name) {
+        if !self.exists_file(name) {
             let file = File::open(name)?;
             let chunks = file_to_chunks(file);
             for chunk in chunks.clone() {
@@ -144,13 +120,14 @@ impl DocumentCollection {
 
     fn compute_chunk_weight(&self, chunk: u64, frequency: usize) -> f64 {
         let n = self.collection_digests.len() as f64;
-        let count = *self.collection_digests.get(&chunk).unwrap() as f64;
+        let count = *self.collection_digests.get(&chunk).unwrap_or(&0) as f64;
         let doc_weight = if count > 0.0 {
             (n / count).log10()
         } else {
             1.0_f64
         };
-        let chunk_weight = 1.0_f64 + (frequency as f64).log10();
+        // Avoid getting infinity as an answer, as it will not serialize well with json
+        let chunk_weight = if frequency > 0 { 1.0_f64 + (frequency as f64).log10()} else { 1.0_f64 };
         doc_weight * chunk_weight
     }
 
@@ -160,13 +137,14 @@ impl DocumentCollection {
         // doc.into_iter().map(|chunk| self.compute_chunk_weight(chunk, frequencies.count(&chunk))).collect()
         // This is correct according to my understanding of how TF/IDF works.
         let hashed_doc = compute_document_frequencies(doc);
-        return self
+        let digest =  self
             .collection_digests
             .keys()
             .map(|known_chunk| {
                 self.compute_chunk_weight(*known_chunk, hashed_doc.count(&known_chunk))
             })
             .collect();
+        digest
     }
 }
 
@@ -205,17 +183,19 @@ impl std::hash::Hash for DocumentCollection {
     }
 }
 
-pub fn ranked_search<'a>(doc: &[f64], documents: &'a [Document], _: usize) -> Vec<&'a Document> {
-    let mut queue: PriorityQueue<&Document, OrderedFloat<f64>> = PriorityQueue::new();
+pub fn ranked_search(doc: &[f64], documents: &[Document], k: usize) -> Vec<(f64, Document)> {
+    let mut queue = Heap::new(k);
     documents
         .iter()
-        .map(|other_doc| (other_doc, cosine_similarity(&other_doc.digest, doc)))
+        .map(|other_doc| (other_doc, cosine_distance(&other_doc.digest, doc)))
         .for_each(|(d, score)| {
-            let _ = queue.push(d, OrderedFloat::from(score));
+            let _ = queue.insert(score, d);
         });
-    let mut v = queue.into_sorted_vec();
-    v.reverse();
-    v
+        let mut result = Vec::new();
+        for i in queue.get_elements() {
+            result.push((i.0, i.1.clone()));
+        }
+        result
 }
 
 pub fn cosine_similarity(vec1: &[f64], vec2: &[f64]) -> f64 {
@@ -233,16 +213,41 @@ pub fn cosine_similarity(vec1: &[f64], vec2: &[f64]) -> f64 {
     norm_prod / (norm_a.sqrt() * norm_b.sqrt())
 }
 
+pub fn cosine_distance(vec1: &[f64], vec2: &[f64]) -> f64 {
+    1.0_f64 - cosine_similarity(vec1, vec2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fbhash::similarities::compute_document_scores;
-    use crate::fbhash::similarities::compute_file_frequencies;
     use crate::fbhash::similarities::cosine_similarity;
     use frequency::Frequency;
     use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
     use std::fs::File;
     use std::io;
+
+    fn compute_file_frequencies(file: File) -> HashMapFrequency<u64> {
+        let mut frequency_map: HashMapFrequency<u64> = HashMapFrequency::new();
+
+        // This is a roundabout way, because HashMapFrequency needs &u64
+        file_to_chunks(file)
+            .into_iter()
+            .for_each(|e| frequency_map.increment(e));
+
+        frequency_map
+    }
+
+    fn compute_scores_from_frequencies(freq_map: &HashMapFrequency<u64>) -> HashMap<u64, f64> {
+        freq_map
+            .into_iter()
+            .map(|(k, v)| (*k, 1.0 + (*v as f64).log10()))
+            .collect()
+    }
+
+    fn compute_document_scores(file: File) -> HashMap<u64, f64> {
+        let frequencies = compute_file_frequencies(file);
+        compute_scores_from_frequencies(&frequencies)
+    }
 
     #[test]
     fn test_compute_document_frequencies() -> io::Result<()> {
@@ -328,7 +333,7 @@ mod tests {
     fn test_serialization_of_document() -> io::Result<()> {
         let name = String::from("testdata/testfile-yes.bin");
         let mut document_collection = DocumentCollection::new();
-        let chunks = document_collection.add_file(&name)?.unwrap().chunks.clone();
+        let chunks = document_collection.add_file(&name)?.unwrap().chunks;
         let doc_vector = document_collection.compute_digest(&name)?;
         let doc = Document {
             file: name,

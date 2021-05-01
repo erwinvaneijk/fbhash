@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 
-use crate::chunker::ChunkIterator;
+use crate::fbhash::chunker::ChunkIterator;
 
 pub fn file_to_chunks(file: File) -> Vec<u64> {
     let chunk_iterator = ChunkIterator::new(file);
@@ -236,9 +236,9 @@ pub fn cosine_similarity(vec1: &[f64], vec2: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::similarities::compute_document_scores;
-    use crate::similarities::compute_file_frequencies;
-    use crate::similarities::cosine_similarity;
+    use crate::fbhash::similarities::compute_document_scores;
+    use crate::fbhash::similarities::compute_file_frequencies;
+    use crate::fbhash::similarities::cosine_similarity;
     use frequency::Frequency;
     use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
     use std::fs::File;

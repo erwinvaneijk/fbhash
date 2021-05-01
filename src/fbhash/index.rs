@@ -18,21 +18,13 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
-#[cfg(test)]
-#[macro_use]
-extern crate float_cmp;
-
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use walkdir::WalkDir;
 
-mod chunker;
-mod similarities;
+use crate::fbhash::similarities::*;
 
 fn get_files_from_dir(start_path: &str) -> Vec<String> {
     WalkDir::new(start_path)
@@ -43,32 +35,48 @@ fn get_files_from_dir(start_path: &str) -> Vec<String> {
         .collect()
 }
 
-fn main() -> std::io::Result<()> {
-    let document_collection = RefCell::new(similarities::DocumentCollection::new());
-    let files: Vec<String> = get_files_from_dir(".");
-    let mut results: Vec<similarities::Document> = Vec::new();
-    for file_name in files.iter().take(100) {
+fn index_directory(
+    start_path: &str,
+    document_collection: &RefCell<DocumentCollection>,
+) -> std::io::Result<Vec<Document>> {
+    let files: Vec<String> = get_files_from_dir(start_path);
+    let mut results: Vec<Document> = Vec::new();
+    for file_name in files {
         let mut dc = document_collection.borrow_mut();
         println!("Processing: {}", file_name);
         let added_file = dc.add_file(&file_name);
         match added_file {
             Err(_) => println!("Ignoring file {}", file_name),
-            Ok(document) => results.push(document.unwrap()),
+            Ok(document) => {
+                results.push(document.unwrap());
+            }
         }
     }
+    Ok(results)
+}
 
-    {
-        println!("Output the frequencies state");
-        let mut state_output = File::create("document_state.json")?;
-        let doc_ref: &similarities::DocumentCollection = &(document_collection.borrow());
-        state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
+pub fn index_paths(
+    paths: &Vec<&str>,
+    output_state_file: &str,
+    results_file: &str,
+) -> std::io::Result<()> {
+    let document_collection = RefCell::new(DocumentCollection::new());
+
+    let mut results: Vec<_> = Vec::new();
+    for path in paths.iter() {
+        results.append(&mut index_directory(path, &document_collection).unwrap());
     }
+
+    println!("Output the frequencies state");
+    let mut state_output = File::create(output_state_file)?;
+    let doc_ref: &DocumentCollection = &(document_collection.borrow());
+    state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
 
     println!("Updating statistics");
 
-    let updated_results: Vec<similarities::Document> = results
+    let updated_results: Vec<Document> = results
         .iter()
-        .map(|doc| similarities::Document {
+        .map(|doc| Document {
             file: doc.file.to_string(),
             chunks: doc.chunks.clone(),
             digest: document_collection
@@ -80,13 +88,14 @@ fn main() -> std::io::Result<()> {
     println!("Output to file");
 
     // Now start serializing it to a json file.
-    let mut output = File::create("total.json")?;
+    let mut output = File::create(results_file)?;
     for doc in updated_results {
         output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
         output.write_all(b"\n")?;
     }
     Ok(())
 }
+
 
 #[cfg(test)]
 mod tests {

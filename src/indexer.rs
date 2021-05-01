@@ -25,6 +25,7 @@ extern crate pretty_assertions;
 #[macro_use]
 extern crate float_cmp;
 
+use clap::{App, Arg, SubCommand};
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
@@ -43,26 +44,42 @@ fn get_files_from_dir(start_path: &str) -> Vec<String> {
         .collect()
 }
 
-fn main() -> std::io::Result<()> {
-    let document_collection = RefCell::new(similarities::DocumentCollection::new());
-    let files: Vec<String> = get_files_from_dir(".");
+fn index_directory(
+    start_path: &str,
+    document_collection: &RefCell<similarities::DocumentCollection>,
+) -> std::io::Result<Vec<similarities::Document>> {
+    let files: Vec<String> = get_files_from_dir(start_path);
     let mut results: Vec<similarities::Document> = Vec::new();
-    for file_name in files.iter().take(100) {
+    for file_name in files {
         let mut dc = document_collection.borrow_mut();
         println!("Processing: {}", file_name);
         let added_file = dc.add_file(&file_name);
         match added_file {
             Err(_) => println!("Ignoring file {}", file_name),
-            Ok(document) => results.push(document.unwrap()),
+            Ok(document) => {
+                results.push(document.unwrap());
+            }
         }
     }
+    Ok(results)
+}
 
-    {
-        println!("Output the frequencies state");
-        let mut state_output = File::create("document_state.json")?;
-        let doc_ref: &similarities::DocumentCollection = &(document_collection.borrow());
-        state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
+fn index_paths(
+    paths: &Vec<&str>,
+    output_state_file: &str,
+    results_file: &str,
+) -> std::io::Result<()> {
+    let document_collection = RefCell::new(similarities::DocumentCollection::new());
+
+    let mut results: Vec<_> = Vec::new();
+    for path in paths.iter() {
+        results.append(&mut index_directory(path, &document_collection).unwrap());
     }
+
+    println!("Output the frequencies state");
+    let mut state_output = File::create(output_state_file)?;
+    let doc_ref: &similarities::DocumentCollection = &(document_collection.borrow());
+    state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
 
     println!("Updating statistics");
 
@@ -80,10 +97,53 @@ fn main() -> std::io::Result<()> {
     println!("Output to file");
 
     // Now start serializing it to a json file.
-    let mut output = File::create("total.json")?;
+    let mut output = File::create(results_file)?;
     for doc in updated_results {
         output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
         output.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    let matches = App::new("fbhash")
+        .version("0.1.0")
+        .author("Erwin van Eijk")
+        .about("Find near duplicates of files")
+        .subcommand(
+            SubCommand::with_name("index")
+                .arg(
+                    Arg::with_name("INPUT ...")
+                        .required(true)
+                        .index(1)
+                        .help("Path to directories to process")
+                        .multiple(true),
+                )
+                .arg(
+                    Arg::with_name("output_state")
+                        .short("o")
+                        .value_name("STATE_FILE")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("results_file")
+                        .short("r")
+                        .value_name("RESULTS_FILE")
+                        .takes_value(true),
+                ),
+        )
+        .get_matches();
+
+    if let Some(subcommand_matches) = matches.subcommand_matches("index") {
+        let paths: Vec<_> = subcommand_matches.values_of("INPUT").unwrap().collect();
+        let output_state_file = subcommand_matches
+            .value_of("STATE_FILE")
+            .unwrap_or("collection_state.json");
+        let results_file = subcommand_matches
+            .value_of("RESULTS_FILE")
+            .unwrap_or("results.json");
+
+        index_paths(&paths, output_state_file, results_file)?;
     }
     Ok(())
 }

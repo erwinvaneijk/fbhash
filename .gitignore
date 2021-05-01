@@ -4,3 +4,6 @@
 /.vscode/
 total.json
 document_state.json
+database.json
+index.json
+more_database.yaml

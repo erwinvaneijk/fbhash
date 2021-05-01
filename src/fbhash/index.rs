@@ -38,7 +38,7 @@ fn get_files_from_dir(start_path: &str) -> Vec<String> {
 fn index_directory(
     start_path: &str,
     document_collection: &RefCell<DocumentCollection>,
-) -> std::io::Result<Vec<Document>> {
+) -> Vec<Document> {
     let files: Vec<String> = get_files_from_dir(start_path);
     let mut results: Vec<Document> = Vec::new();
     for file_name in files {
@@ -52,11 +52,11 @@ fn index_directory(
             }
         }
     }
-    Ok(results)
+    results
 }
 
 pub fn index_paths(
-    paths: &Vec<&str>,
+    paths: &[&str],
     output_state_file: &str,
     results_file: &str,
 ) -> std::io::Result<()> {
@@ -64,7 +64,7 @@ pub fn index_paths(
 
     let mut results: Vec<_> = Vec::new();
     for path in paths.iter() {
-        results.append(&mut index_directory(path, &document_collection).unwrap());
+        results.append(&mut index_directory(path, &document_collection));
     }
 
     println!("Output the frequencies state");
@@ -78,7 +78,7 @@ pub fn index_paths(
         .iter()
         .map(|doc| Document {
             file: doc.file.to_string(),
-            chunks: doc.chunks.clone(),
+            chunks: Vec::new(), // Remove the old chunks, we don't need them anymore
             digest: document_collection
                 .borrow()
                 .compute_document_digest(&doc.chunks),
@@ -95,7 +95,6 @@ pub fn index_paths(
     }
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

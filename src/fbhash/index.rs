@@ -18,22 +18,13 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
-#[cfg(test)]
-#[macro_use]
-extern crate float_cmp;
-
-use clap::{App, Arg, SubCommand};
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use walkdir::WalkDir;
 
-mod chunker;
-mod similarities;
+use crate::fbhash::similarities::*;
 
 fn get_files_from_dir(start_path: &str) -> Vec<String> {
     WalkDir::new(start_path)
@@ -46,10 +37,10 @@ fn get_files_from_dir(start_path: &str) -> Vec<String> {
 
 fn index_directory(
     start_path: &str,
-    document_collection: &RefCell<similarities::DocumentCollection>,
-) -> std::io::Result<Vec<similarities::Document>> {
+    document_collection: &RefCell<DocumentCollection>,
+) -> std::io::Result<Vec<Document>> {
     let files: Vec<String> = get_files_from_dir(start_path);
-    let mut results: Vec<similarities::Document> = Vec::new();
+    let mut results: Vec<Document> = Vec::new();
     for file_name in files {
         let mut dc = document_collection.borrow_mut();
         println!("Processing: {}", file_name);
@@ -64,12 +55,12 @@ fn index_directory(
     Ok(results)
 }
 
-fn index_paths(
+pub fn index_paths(
     paths: &Vec<&str>,
     output_state_file: &str,
     results_file: &str,
 ) -> std::io::Result<()> {
-    let document_collection = RefCell::new(similarities::DocumentCollection::new());
+    let document_collection = RefCell::new(DocumentCollection::new());
 
     let mut results: Vec<_> = Vec::new();
     for path in paths.iter() {
@@ -78,14 +69,14 @@ fn index_paths(
 
     println!("Output the frequencies state");
     let mut state_output = File::create(output_state_file)?;
-    let doc_ref: &similarities::DocumentCollection = &(document_collection.borrow());
+    let doc_ref: &DocumentCollection = &(document_collection.borrow());
     state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
 
     println!("Updating statistics");
 
-    let updated_results: Vec<similarities::Document> = results
+    let updated_results: Vec<Document> = results
         .iter()
-        .map(|doc| similarities::Document {
+        .map(|doc| Document {
             file: doc.file.to_string(),
             chunks: doc.chunks.clone(),
             digest: document_collection
@@ -105,48 +96,6 @@ fn index_paths(
     Ok(())
 }
 
-fn main() -> std::io::Result<()> {
-    let matches = App::new("fbhash")
-        .version("0.1.0")
-        .author("Erwin van Eijk")
-        .about("Find near duplicates of files")
-        .subcommand(
-            SubCommand::with_name("index")
-                .arg(
-                    Arg::with_name("INPUT ...")
-                        .required(true)
-                        .index(1)
-                        .help("Path to directories to process")
-                        .multiple(true),
-                )
-                .arg(
-                    Arg::with_name("output_state")
-                        .short("o")
-                        .value_name("STATE_FILE")
-                        .takes_value(true),
-                )
-                .arg(
-                    Arg::with_name("results_file")
-                        .short("r")
-                        .value_name("RESULTS_FILE")
-                        .takes_value(true),
-                ),
-        )
-        .get_matches();
-
-    if let Some(subcommand_matches) = matches.subcommand_matches("index") {
-        let paths: Vec<_> = subcommand_matches.values_of("INPUT").unwrap().collect();
-        let output_state_file = subcommand_matches
-            .value_of("STATE_FILE")
-            .unwrap_or("collection_state.json");
-        let results_file = subcommand_matches
-            .value_of("RESULTS_FILE")
-            .unwrap_or("results.json");
-
-        index_paths(&paths, output_state_file, results_file)?;
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

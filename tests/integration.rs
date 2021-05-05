@@ -48,17 +48,31 @@ fn test_testdata_integration() -> Result<(), Box<dyn std::error::Error>> {
         .arg(database_file.clone())
         .arg(output_state_file.clone())
         .arg(files[0]);
+
+    #[cfg(not(target_os = "windows"))]
     query_command.assert().success().stdout(format!(
         "Reading database: {}\n\
 Reading the database with the files: {}\n\
 Results: 3\n\
 testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata/testfile-yes.bin\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero-length\n",
+testdata/testfile-yes.bin => (1) testdata/testfile-zero-length\n\
+testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n",
         output_state_file.to_str().unwrap(),
         database_file.to_str().unwrap()
     ));
 
-    dir.close();
+    #[cfg(target_os = "windows")]
+    query_command.assert().success().stdout(format!(
+        "Reading database: {}\n\
+Reading the database with the files: {}\n\
+Results: 3\n\
+testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata\\testfile-yes.bin\n\
+testdata/testfile-yes.bin => (1) testdata\\testfile-zero-length\n\
+testdata/testfile-yes.bin => (1) testdata\\testfile-zero.bin\n",
+        output_state_file.to_str().unwrap(),
+        database_file.to_str().unwrap()
+    ));
+
+    dir.close()?;
     Ok(())
 }

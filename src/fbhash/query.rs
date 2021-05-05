@@ -19,6 +19,7 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::fbhash::similarities::*;
+use std::cmp::Ordering;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -42,13 +43,24 @@ pub fn query_for_results(
                 let doc: Document = serde_json::from_str(ok_line.as_str()).unwrap();
                 documents.push(doc);
             }
-            Err(v) => panic!(v),
+            Err(v) => panic!("{}", v),
         }
     }
 
     for file_name in files {
         let document = document_collection.compute_digest(file_name).ok().unwrap();
-        let results = ranked_search(&document, &documents, number_of_results);
+        let mut results = ranked_search(&document, &documents, number_of_results);
+        // For better testing purposes, the result is sorted by priority, file,
+        // so the output can be predictable.
+        results.sort_by(|a, b| {
+            if a.0 < b.0 {
+                Ordering::Less
+            } else if a.0 > b.0 {
+                Ordering::Greater
+            } else {
+                a.1.file.cmp(&b.1.file)
+            }
+        });
         println!("Results: {}", results.len());
         for result in &results {
             println!("{} => ({}) {}", file_name, result.0, result.1.file);

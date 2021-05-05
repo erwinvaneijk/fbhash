@@ -124,10 +124,14 @@ impl DocumentCollection {
         let doc_weight = if count > 0.0 {
             (n / count).log10()
         } else {
-            1.0_f64
+            0.0_f64
         };
         // Avoid getting infinity as an answer, as it will not serialize well with json
-        let chunk_weight = if frequency > 0 { 1.0_f64 + (frequency as f64).log10()} else { 1.0_f64 };
+        let chunk_weight = if frequency > 0 {
+            (1.0_f64 + frequency as f64).log10()
+        } else {
+            0.0_f64
+        };
         doc_weight * chunk_weight
     }
 
@@ -137,7 +141,7 @@ impl DocumentCollection {
         // doc.into_iter().map(|chunk| self.compute_chunk_weight(chunk, frequencies.count(&chunk))).collect()
         // This is correct according to my understanding of how TF/IDF works.
         let hashed_doc = compute_document_frequencies(doc);
-        let digest =  self
+        let digest = self
             .collection_digests
             .keys()
             .map(|known_chunk| {
@@ -191,11 +195,11 @@ pub fn ranked_search(doc: &[f64], documents: &[Document], k: usize) -> Vec<(f64,
         .for_each(|(d, score)| {
             let _ = queue.insert(score, d);
         });
-        let mut result = Vec::new();
-        for i in queue.get_elements() {
-            result.push((i.0, i.1.clone()));
-        }
-        result
+    let mut result = Vec::new();
+    for i in queue.get_elements() {
+        result.push((i.0, i.1.clone()));
+    }
+    result
 }
 
 pub fn cosine_similarity(vec1: &[f64], vec2: &[f64]) -> f64 {
@@ -861,8 +865,8 @@ mod tests {
                 Token::SeqEnd,
                 Token::Str("digest"),
                 Token::Seq { len: Some(2) },
-                Token::F64(-7.153667404738591),
-                Token::F64(-7.153667404738591),
+                Token::F64(-5.055178171138189),
+                Token::F64(-5.055178171138189),
                 Token::SeqEnd,
                 Token::StructEnd,
             ],

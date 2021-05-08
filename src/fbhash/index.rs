@@ -18,20 +18,23 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use console::style;
 use std::cell::RefCell;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
-use std::path::Path;
+use std::path::{PathBuf};
+use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
 
 use crate::fbhash::similarities::*;
 
-fn get_files_from_dir(start_path: &str) -> Vec<String> {
+fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
     WalkDir::new(start_path)
         .follow_links(false)
         .into_iter()
-        .map(|e| String::from(e.ok().unwrap().path().to_str().unwrap()))
-        .filter(|name| Path::new(name).is_file())
+        .map(|e| e.ok().unwrap().path().to_owned())
+        .filter(|path_name| path_name.is_file())
         .collect()
 }
 
@@ -39,18 +42,31 @@ fn index_directory(
     start_path: &str,
     document_collection: &RefCell<DocumentCollection>,
 ) -> Vec<Document> {
-    let files: Vec<String> = get_files_from_dir(start_path);
+    let files: Vec<PathBuf> = get_files_from_dir(start_path);
+    let pb = 
+        if console::user_attended() {
+            ProgressBar::new(files.len().try_into().unwrap())
+        } else {
+            ProgressBar::hidden()
+        };
+    let style = ProgressStyle::default_bar()
+    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+    pb.set_style(style);
     let mut results: Vec<Document> = Vec::new();
-    for file_name in files {
+    for file_path in files {
         let mut dc = document_collection.borrow_mut();
-        println!("Processing: {}", file_name);
-        let added_file = dc.add_file(&file_name);
+        let base_name = file_path.file_name();
+        if base_name.is_some() {
+            pb.set_message(format!("{}", base_name.unwrap().to_string_lossy()));
+        }
+        let added_file = dc.add_file(&file_path.to_string_lossy());
         match added_file {
-            Err(_) => println!("Ignoring file {}", file_name),
+            Err(_) => println!("Ignoring file {}", file_path.to_string_lossy()),
             Ok(document) => {
                 results.push(document.unwrap());
             }
         }
+        pb.inc(1);
     }
     results
 }
@@ -62,20 +78,37 @@ pub fn index_paths(
 ) -> std::io::Result<()> {
     let document_collection = RefCell::new(DocumentCollection::new());
 
+    if console::user_attended() {
+        println!("{} Processing paths to process...", style("[1/4]").bold().dim());
+    }
+
     let mut results: Vec<_> = Vec::new();
     for path in paths.iter() {
         results.append(&mut index_directory(path, &document_collection));
     }
 
-    println!("Output the frequencies state");
+    if console::user_attended() {
+        println!("{} Output the frequencies state...", style("[2/4]").bold().dim());
+    }
     let mut state_output = File::create(output_state_file)?;
     let doc_ref: &DocumentCollection = &(document_collection.borrow());
     state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
 
-    println!("Updating statistics");
+    if console::user_attended() {
+        println!("{} Updating statistics...", style("[3/4]").bold().dim());
+    }
 
-    let updated_results: Vec<Document> = results
-        .iter()
+    let progress_bar = 
+        if console::user_attended() { 
+            ProgressBar::new(results.len().try_into().unwrap())
+        } else { 
+            ProgressBar::hidden() 
+        };
+    let style = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+    progress_bar.set_style(style);
+
+    let updated_results: Vec<Document> = progress_bar.wrap_iter(results.iter())
         .map(|doc| Document {
             file: doc.file.to_string(),
             chunks: Vec::new(), // Remove the old chunks, we don't need them anymore
@@ -85,11 +118,14 @@ pub fn index_paths(
         })
         .collect();
 
-    println!("Output to file");
+    if console::user_attended() {
+        println!("{} Output file database to {}", console::style("[4/4]").bold().dim(), results_file);
+    }
 
+    progress_bar.reset();
     // Now start serializing it to a json file.
     let mut output = File::create(results_file)?;
-    for doc in updated_results {
+    for doc in progress_bar.wrap_iter(updated_results.iter()) {
         output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
         output.write_all(b"\n")?;
     }
@@ -99,6 +135,7 @@ pub fn index_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     // TODO:
     //   Move this to a separate testing toolkit?
@@ -120,9 +157,9 @@ mod tests {
         let result = get_files_from_dir("testdata");
         assert!(eq_lists(
             &[
-                String::from("testdata/testfile-zero-length"),
-                String::from("testdata/testfile-yes.bin"),
-                String::from("testdata/testfile-zero.bin"),
+                Path::new("testdata/testfile-zero-length").to_owned(),
+                Path::new("testdata/testfile-yes.bin").to_owned(),
+                Path::new("testdata/testfile-zero.bin").to_owned(),
             ],
             &result[..]
         ));
@@ -132,12 +169,12 @@ mod tests {
     #[test]
     #[cfg(target_os = "windows")]
     fn test_get_files_from_path() {
-        let result: Vec<String> = get_files_from_dir("testdata");
+        let result = get_files_from_dir("testdata");
         assert!(eq_lists(
             &[
-                String::from("testdata\\testfile-yes.bin"),
-                String::from("testdata\\testfile-zero-length"),
-                String::from("testdata\\testfile-zero.bin"),
+                Path::new("testdata\\testfile-yes.bin").to_owned(),
+                Path::new("testdata\\testfile-zero-length").to_owned()
+                Path::new("testdata\\testfile-zero.bin").to_owned(),
             ],
             &result[..]
         ));

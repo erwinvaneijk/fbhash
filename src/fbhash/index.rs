@@ -19,12 +19,12 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use console::style;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::cell::RefCell;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
-use std::path::{PathBuf};
-use indicatif::{ProgressBar, ProgressStyle};
+use std::path::PathBuf;
 use walkdir::WalkDir;
 
 use crate::fbhash::similarities::*;
@@ -43,14 +43,13 @@ fn index_directory(
     document_collection: &RefCell<DocumentCollection>,
 ) -> Vec<Document> {
     let files: Vec<PathBuf> = get_files_from_dir(start_path);
-    let pb = 
-        if console::user_attended() {
-            ProgressBar::new(files.len().try_into().unwrap())
-        } else {
-            ProgressBar::hidden()
-        };
+    let pb = if console::user_attended() {
+        ProgressBar::new(files.len().try_into().unwrap())
+    } else {
+        ProgressBar::hidden()
+    };
     let style = ProgressStyle::default_bar()
-    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
     pb.set_style(style);
     let mut results: Vec<Document> = Vec::new();
     for file_path in files {
@@ -79,7 +78,10 @@ pub fn index_paths(
     let document_collection = RefCell::new(DocumentCollection::new());
 
     if console::user_attended() {
-        println!("{} Processing paths to process...", style("[1/4]").bold().dim());
+        println!(
+            "{} Processing paths to process...",
+            style("[1/4]").bold().dim()
+        );
     }
 
     let mut results: Vec<_> = Vec::new();
@@ -88,7 +90,10 @@ pub fn index_paths(
     }
 
     if console::user_attended() {
-        println!("{} Output the frequencies state...", style("[2/4]").bold().dim());
+        println!(
+            "{} Output the frequencies state...",
+            style("[2/4]").bold().dim()
+        );
     }
     let mut state_output = File::create(output_state_file)?;
     let doc_ref: &DocumentCollection = &(document_collection.borrow());
@@ -98,17 +103,17 @@ pub fn index_paths(
         println!("{} Updating statistics...", style("[3/4]").bold().dim());
     }
 
-    let progress_bar = 
-        if console::user_attended() { 
-            ProgressBar::new(results.len().try_into().unwrap())
-        } else { 
-            ProgressBar::hidden() 
-        };
+    let progress_bar = if console::user_attended() {
+        ProgressBar::new(results.len().try_into().unwrap())
+    } else {
+        ProgressBar::hidden()
+    };
     let style = ProgressStyle::default_bar()
         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
     progress_bar.set_style(style);
 
-    let updated_results: Vec<Document> = progress_bar.wrap_iter(results.iter())
+    let updated_results: Vec<Document> = progress_bar
+        .wrap_iter(results.iter())
         .map(|doc| Document {
             file: doc.file.to_string(),
             chunks: Vec::new(), // Remove the old chunks, we don't need them anymore
@@ -119,7 +124,11 @@ pub fn index_paths(
         .collect();
 
     if console::user_attended() {
-        println!("{} Output file database to {}", console::style("[4/4]").bold().dim(), results_file);
+        println!(
+            "{} Output file database to {}",
+            console::style("[4/4]").bold().dim(),
+            results_file
+        );
     }
 
     progress_bar.reset();
@@ -173,7 +182,7 @@ mod tests {
         assert!(eq_lists(
             &[
                 Path::new("testdata\\testfile-yes.bin").to_owned(),
-                Path::new("testdata\\testfile-zero-length").to_owned()
+                Path::new("testdata\\testfile-zero-length").to_owned(),
                 Path::new("testdata\\testfile-zero.bin").to_owned(),
             ],
             &result[..]

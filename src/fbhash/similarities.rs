@@ -44,6 +44,23 @@ pub fn compute_document_frequencies(doc: &[u64]) -> HashMapFrequency<&u64> {
     hmf
 }
 
+pub fn compute_document(file_name: &str) -> io::Result<(Document, HashMap<u64, usize>)> {
+    let file = File::open(file_name)?;
+    let chunks = file_to_chunks(file);
+    let mut file_frequencies: HashMap<u64, usize> = HashMap::new();
+    for chunk in chunks.clone() {
+        let entry = file_frequencies.entry(chunk).or_default();
+        *entry += 1;
+    }
+    
+    let doc = Document {
+        file: file_name.to_string(),
+        chunks,
+        digest: vec![],
+    };
+    Ok((doc, file_frequencies))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
     pub file: String,
@@ -88,24 +105,38 @@ impl DocumentCollection {
         }
     }
 
+    pub fn copy(&self) -> DocumentCollection {
+        DocumentCollection {
+            files: self.files.clone(),
+            collection_digests: self.collection_digests.clone()
+        }
+    }
+
     pub fn add_file(&mut self, name: &str) -> io::Result<Option<Document>> {
         if !self.exists_file(name) {
-            let file = File::open(name)?;
-            let chunks = file_to_chunks(file);
-            for chunk in chunks.clone() {
-                let entry = self.collection_digests.entry(chunk).or_default();
-                *entry += 1;
+            match compute_document(name) {
+                Ok((document, file_frequencies)) => {
+                    // Update internal state.
+                    for (k, v) in file_frequencies {
+                        let entry = self.collection_digests.entry(k).or_default();
+                        *entry += v;
+                    }
+                    self.files.insert(name.to_string());
+                    Ok(Some(document))
+                },
+                Err(v) => Err(v)
             }
-            let doc = Document {
-                file: name.to_string(),
-                chunks,
-                digest: vec![],
-            };
-            self.files.insert(name.to_string());
-            Ok(Some(doc))
         } else {
             Ok(None)
         }
+    }
+
+    pub fn update_collection(&mut self, frequencies: &HashMap<u64, usize>, documents: &[Document]) {
+        for (k, v) in frequencies.iter() {
+            let entry = self.collection_digests.entry(*k).or_default();
+            *entry += v;
+        }
+        self.files.extend(documents.iter().map(|doc|doc.file.to_string()));
     }
 
     pub fn exists_file(&self, name: &str) -> bool {

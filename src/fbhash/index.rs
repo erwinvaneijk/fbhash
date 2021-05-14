@@ -20,10 +20,14 @@
 
 use console::style;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
+
 use std::path::{PathBuf};
+use std::sync::RwLock;
+use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
 
@@ -38,36 +42,87 @@ fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-fn index_directory(
-    start_path: &str,
-    document_collection: &RefCell<DocumentCollection>,
-) -> Vec<Document> {
-    let files: Vec<PathBuf> = get_files_from_dir(start_path);
+// fn integrate_results(intermediate_results: &[Vec<(Document, HashMap<u64, usize>)>], document_collection: &RefCell<DocumentCollection> ) -> Vec<Document> {
+//     let total_elements: usize = intermediate_results.iter().fold(0, |acc, b| acc + b.len());
+//     let mut results: Vec<Document> = vec![Document{file:String::from(""), chunks:vec![], digest:vec![]}; total_elements];
+//     let mut pos = 0;
+//     println!("Start the loop");
+//     intermediate_results.iter().for_each(|j| {
+//         document_collection.borrow_mut().update_collection(&j);
+//         for i in j {
+//             results[pos] = i.0.clone();
+//             pos += 1;
+//         }
+//         }
+//     );
+//     results
+// }
+
+fn create_progress_bar(len: u64) -> ProgressBar {
     let pb = 
         if console::user_attended() {
-            ProgressBar::new(files.len().try_into().unwrap())
+            ProgressBar::new(len)
         } else {
             ProgressBar::hidden()
         };
     let style = ProgressStyle::default_bar()
     .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
     pb.set_style(style);
-    let mut results: Vec<Document> = Vec::new();
-    for file_path in files {
-        let mut dc = document_collection.borrow_mut();
-        let base_name = file_path.file_name();
-        if base_name.is_some() {
-            pb.set_message(format!("{}", base_name.unwrap().to_string_lossy()));
-        }
-        let added_file = dc.add_file(&file_path.to_string_lossy());
-        match added_file {
-            Err(_) => println!("Ignoring file {}", file_path.to_string_lossy()),
-            Ok(document) => {
-                results.push(document.unwrap());
-            }
-        }
-        pb.inc(1);
+    pb
+}
+
+fn get_real_len(v: &[(Document, HashMap<u64, usize>)]) -> usize {
+    v.iter()
+     .fold(0, |sum, (_, hash)| sum + hash.len())
+}
+
+fn integrate_results_other(intermediate_results: &[(Document, HashMap<u64, usize>)], document_collection: &RefCell<DocumentCollection> ) -> Vec<Document> {
+    let len = get_real_len(intermediate_results);
+    let pb = create_progress_bar(len.try_into().unwrap());
+    /*
+    let mut pre_grouped: Vec<(u64, usize)> = pb.wrap_iter(intermediate_results.iter()).flat_map(|(_, hash)| hashmap_to_vec(hash)).collect();
+    pre_grouped.sort_by(|a, b| a.0.cmp(&b.0) );
+    let intermediate_grouped: HashMap<u64, usize> = pre_grouped.iter().group_by(|rec| rec.0)
+        .into_iter().map(|(chunk_id, values)| (chunk_id, values.fold(0_usize, |acc, v| acc + v.1))).collect();
+        */
+    let mut file_names: Vec<Document> = vec![];
+    for (doc, hash) in intermediate_results {
+        let docvec = vec![doc.clone()];
+        document_collection.borrow_mut().update_collection(&hash, &docvec);
+        file_names.push(doc.clone());
+        pb.inc(hash.len().try_into().unwrap());
     }
+    // let file_names = to_document_list(intermediate_results);
+    file_names
+}
+
+fn index_directory_parallel(
+    start_path: &str,
+    document_collection: &RefCell<DocumentCollection>,
+) -> Vec<Document> {
+    let files: Vec<PathBuf> = get_files_from_dir(start_path);
+
+    let pb = create_progress_bar(files.len().try_into().unwrap());
+
+    let intermediate_results: Vec<(Document, HashMap<u64, usize>)> =
+        files.par_iter()
+             .flat_map(|file_path|
+                            {
+                                match compute_document(&file_path.to_string_lossy()) {
+                                    Ok((document, file_frequencies)) => {
+                                        pb.inc(1);
+                                        Some((document, file_frequencies))
+                                    },
+                                    Err(_) => None
+                                }
+                            }
+                      )
+                      .fold(Vec::new, |mut left, right| {left.push(right); left})
+                      .reduce(Vec::new, |mut left, right| {left.extend(right); left});
+    pb.finish_and_clear();
+    println!("Intermediate");
+    let results = integrate_results_other(&intermediate_results, document_collection);
+    println!("done");
     results
 }
 
@@ -84,7 +139,8 @@ pub fn index_paths(
 
     let mut results: Vec<_> = Vec::new();
     for path in paths.iter() {
-        results.append(&mut index_directory(path, &document_collection));
+        let mut intermediate_results = index_directory_parallel(path, &document_collection);
+        results.append(&mut intermediate_results);
     }
 
     if console::user_attended() {
@@ -108,15 +164,22 @@ pub fn index_paths(
         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
     progress_bar.set_style(style);
 
-    let updated_results: Vec<Document> = progress_bar.wrap_iter(results.iter())
-        .map(|doc| Document {
-            file: doc.file.to_string(),
-            chunks: Vec::new(), // Remove the old chunks, we don't need them anymore
-            digest: document_collection
-                .borrow()
-                .compute_document_digest(&doc.chunks),
+    let reference_collection = document_collection.borrow().copy();
+    let document_collection_mutex = RwLock::new(reference_collection);
+    let updated_results: Vec<Document> = results.par_iter()
+        .map(|doc| {
+            let the_collection = document_collection_mutex.read().unwrap();
+            progress_bar.inc(1);
+            Document {
+                file: doc.file.to_string(),
+                chunks: Vec::new(), // Remove the old chunks, we don't need them anymore
+                digest: the_collection
+                    .compute_document_digest(&doc.chunks),
+            }
         })
         .collect();
+
+    progress_bar.finish_and_clear();
 
     if console::user_attended() {
         println!("{} Output file database to {}", console::style("[4/4]").bold().dim(), results_file);
@@ -149,6 +212,17 @@ mod tests {
         b.sort();
 
         a == b
+    }
+
+    #[test]
+    fn test_large_merges() {
+        let test_vec: Vec<Vec<Document>> =
+            (0..1000).into_iter().map(|_| (0..1000).into_iter().map(|n| Document{file: format!("{}", n), chunks: Vec::with_capacity(1000), digest: vec![]}).collect()).collect();
+        let total_vec: Vec<_> = test_vec.iter().flat_map(|v| v.iter().map(|e| e.file.clone())).collect();
+        assert_eq!(1_000_000, total_vec.len());
+        assert_eq!("0", total_vec[0]);
+        assert_eq!("100", total_vec[100]);
+        assert_eq!("99", total_vec[99])
     }
 
     #[test]

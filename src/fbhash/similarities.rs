@@ -25,8 +25,8 @@ use frequency::Frequency;
 use frequency_hashmap::HashMapFrequency;
 use hash_hasher::HashBuildHasher;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, BTreeMap};
+use hashbrown::HashMap;
 use std::fs::File;
 use std::io;
 
@@ -49,8 +49,7 @@ pub fn compute_document(file_name: &str) -> io::Result<(Document, HashMap<u64, u
     let chunks = file_to_chunks(file);
     let mut file_frequencies: HashMap<u64, usize> = HashMap::new();
     for chunk in chunks.clone() {
-        let entry = file_frequencies.entry(chunk).or_default();
-        *entry += 1;
+        file_frequencies.entry(chunk).and_modify(|e| {*e += 1}).or_insert(1);
     }
     
     let doc = Document {
@@ -65,7 +64,7 @@ pub fn compute_document(file_name: &str) -> io::Result<(Document, HashMap<u64, u
 pub struct Document {
     pub file: String,
     pub chunks: Vec<u64>,
-    pub digest: Vec<f64>,
+    pub digest: Vec<(u64, f64)>,
 }
 
 impl PartialEq for Document {
@@ -101,7 +100,7 @@ impl DocumentCollection {
     pub fn new() -> DocumentCollection {
         DocumentCollection {
             files: BTreeSet::new(),
-            collection_digests: HashMap::default(),
+            collection_digests: HashMap::default()
         }
     }
 
@@ -111,6 +110,11 @@ impl DocumentCollection {
             collection_digests: self.collection_digests.clone()
         }
     }
+ 
+    pub fn extend(&mut self, other: &DocumentCollection) {
+        self.files.extend(other.files.iter().cloned());
+        self.collection_digests.extend(other.collection_digests.iter().map(|(k,v)| (*k, *v)));
+    }
 
     pub fn add_file(&mut self, name: &str) -> io::Result<Option<Document>> {
         if !self.exists_file(name) {
@@ -118,8 +122,7 @@ impl DocumentCollection {
                 Ok((document, file_frequencies)) => {
                     // Update internal state.
                     for (k, v) in file_frequencies {
-                        let entry = self.collection_digests.entry(k).or_default();
-                        *entry += v;
+                        self.collection_digests.entry(k).and_modify(|e| {*e += v}).or_insert(v);
                     }
                     self.files.insert(name.to_string());
                     Ok(Some(document))
@@ -131,42 +134,53 @@ impl DocumentCollection {
         }
     }
 
-    pub fn update_collection(&mut self, frequencies: &HashMap<u64, usize>, documents: &[Document]) {
+    pub fn update_collection(&mut self, frequencies: &HashMap<u64, usize>, names: &[String]) -> usize {
+        self.collection_digests.reserve(frequencies.len());
         for (k, v) in frequencies.iter() {
-            let entry = self.collection_digests.entry(*k).or_default();
-            *entry += v;
+            self.collection_digests.entry(*k).and_modify(|e| {*e += v}).or_insert(*v);
         }
-        self.files.extend(documents.iter().map(|doc|doc.file.to_string()));
+        self.files.extend(names.iter().cloned());
+        self.collection_digests.len()
     }
 
     pub fn exists_file(&self, name: &str) -> bool {
         self.files.contains(name)
     }
 
-    pub fn compute_digest(&self, name: &str) -> io::Result<Vec<f64>> {
+    pub fn compute_digest(&self, name: &str) -> io::Result<Vec<(u64, f64)>> {
         let file = File::open(name)?;
         let document: Vec<u64> = file_to_chunks(file);
         Ok(self.compute_document_digest(&document))
     }
 
-    fn compute_chunk_weight(&self, chunk: u64, frequency: usize) -> f64 {
-        let n = self.collection_digests.len() as f64;
-        let count = *self.collection_digests.get(&chunk).unwrap_or(&0) as f64;
-        let doc_weight = if count > 0.0 {
-            (n / count).log10()
+    fn compute_chunk_weight(&self, chunk: u64, frequency: usize) -> Option<f64> {
+        if frequency == 0 {
+            None
         } else {
-            0.0_f64
-        };
-        // Avoid getting infinity as an answer, as it will not serialize well with json
-        let chunk_weight = if frequency > 0 {
-            (1.0_f64 + frequency as f64).log10()
-        } else {
-            0.0_f64
-        };
-        doc_weight * chunk_weight
+            let entry = self.collection_digests.get(&chunk);
+            match entry {
+                None => None,
+                Some(value) => {
+                    let n = self.collection_digests.len() as f64;
+                    let count = *value as f64;
+                    let doc_weight = if count > 0.0 {
+                        (n / count).log10()
+                    } else {
+                        0.0_f64
+                    };
+                    // Avoid getting infinity as an answer, as it will not serialize well with json
+                    let chunk_weight = if frequency > 0 {
+                        (1.0_f64 + frequency as f64).log10()
+                    } else {
+                        0.0_f64
+                    };
+                    Some(doc_weight * chunk_weight)
+                }
+            }
+        }
     }
 
-    pub fn compute_document_digest(&self, doc: &[u64]) -> Vec<f64> {
+    pub fn compute_document_digest(&self, doc: &[u64]) -> Vec<(u64, f64)> {
         // The following is correct according to the paper
         // let frequencies = compute_document_frequencies(doc.clone());
         // doc.into_iter().map(|chunk| self.compute_chunk_weight(chunk, frequencies.count(&chunk))).collect()
@@ -176,9 +190,9 @@ impl DocumentCollection {
             .collection_digests
             .keys()
             .map(|known_chunk| {
-                self.compute_chunk_weight(*known_chunk, hashed_doc.count(&known_chunk))
+                (*known_chunk, self.compute_chunk_weight(*known_chunk, hashed_doc.count(&known_chunk)))
             })
-            .collect();
+            .filter(|(_, v)| v.is_some()).map(|(k, v)| (k, v.unwrap())).collect();
         digest
     }
 }
@@ -218,7 +232,7 @@ impl std::hash::Hash for DocumentCollection {
     }
 }
 
-pub fn ranked_search(doc: &[f64], documents: &[Document], k: usize) -> Vec<(f64, Document)> {
+pub fn ranked_search(doc: &[(u64, f64)], documents: &[Document], k: usize) -> Vec<(f64, Document)> {
     let mut queue = Heap::new(k);
     documents
         .iter()
@@ -233,22 +247,39 @@ pub fn ranked_search(doc: &[f64], documents: &[Document], k: usize) -> Vec<(f64,
     result
 }
 
-pub fn cosine_similarity(vec1: &[f64], vec2: &[f64]) -> f64 {
+//
+// Compute the cosine similarity between these two vectors,
+// it is assumed that the index in the vectors is sorted
+//
+pub fn cosine_similarity(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
     if vec1.is_empty() || vec2.is_empty() {
         return if vec1.len() == vec1.len() { 0. } else { 1. };
     }
-    let iter_a = vec1.iter();
-    let iter_b = vec2.iter();
-    let (norm_a, norm_b, norm_prod) = iter_a.zip(iter_b).into_iter().fold(
+    let mut coll: BTreeMap<u64, (Option<f64>, Option<f64>)> 
+        = vec1.iter().map(|(k, v)| (*k, (Some(*v), None))).collect();
+    
+    vec2.iter().for_each(|(k, v)| {
+        coll.entry(*k)
+            .and_modify(|e| e.1 = Some(*v)).or_insert((None, Some(*v)));
+    });
+
+    let (norm_a, norm_b, norm_prod)  =
+    coll.values().fold(
         (0_f64, 0_f64, 0_f64),
         |(norm_a, norm_b, norm_prod), (n1, n2)| {
-            (norm_a + n1 * n1, norm_b + n2 * n2, norm_prod + n1 * n2)
-        },
+            if n1.is_some() && n2.is_some() {
+                (norm_a + n1.unwrap() * n1.unwrap(), norm_b + n2.unwrap() * n2.unwrap(), norm_prod + n1.unwrap() * n2.unwrap())
+            } else if n1.is_some() {
+                (norm_a + n1.unwrap() * n1.unwrap(), norm_b , norm_prod)
+            } else {
+                (norm_a, norm_b + n2.unwrap() * n2.unwrap() , norm_prod)
+            }
+        }
     );
     norm_prod / (norm_a.sqrt() * norm_b.sqrt())
 }
 
-pub fn cosine_distance(vec1: &[f64], vec2: &[f64]) -> f64 {
+pub fn cosine_distance(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
     1.0_f64 - cosine_similarity(vec1, vec2)
 }
 
@@ -348,8 +379,8 @@ mod tests {
 
     #[test]
     fn test_cosine_distance() {
-        let vec1 = vec![0.0, 0.1, 0.2];
-        let vec2 = vec![0.0, -0.1, -0.2];
+        let vec1 = vec![(0, -1.0), (1, 0.1), (2, 0.2)];
+        let vec2 = vec![(0, 1.0), (1, -0.1), (2, -0.2)];
         assert!(approx_eq!(
             f64,
             cosine_similarity(&vec1, &vec1),
@@ -896,8 +927,14 @@ mod tests {
                 Token::SeqEnd,
                 Token::Str("digest"),
                 Token::Seq { len: Some(2) },
+                Token::Tuple { len: 2},
+                Token::U64(2879926931474365),
                 Token::F64(-5.055178171138189),
+                Token::TupleEnd,
+                Token::Tuple { len: 2},
+                Token::U64(33279275454869446),
                 Token::F64(-5.055178171138189),
+                Token::TupleEnd,
                 Token::SeqEnd,
                 Token::StructEnd,
             ],

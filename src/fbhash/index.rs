@@ -20,7 +20,9 @@
 
 use console::style;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc;
+use hashbrown::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
@@ -28,7 +30,7 @@ use std::io::prelude::*;
 use std::path::{PathBuf};
 use std::sync::RwLock;
 use rayon::prelude::*;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle, ProgressIterator};
 use walkdir::WalkDir;
 
 use crate::fbhash::similarities::*;
@@ -71,58 +73,49 @@ fn create_progress_bar(len: u64) -> ProgressBar {
     pb
 }
 
-fn get_real_len(v: &[(Document, HashMap<u64, usize>)]) -> usize {
-    v.iter()
-     .fold(0, |sum, (_, hash)| sum + hash.len())
-}
-
-fn integrate_results_other(intermediate_results: &[(Document, HashMap<u64, usize>)], document_collection: &RefCell<DocumentCollection> ) -> Vec<Document> {
-    let len = get_real_len(intermediate_results);
-    let pb = create_progress_bar(len.try_into().unwrap());
-    /*
-    let mut pre_grouped: Vec<(u64, usize)> = pb.wrap_iter(intermediate_results.iter()).flat_map(|(_, hash)| hashmap_to_vec(hash)).collect();
-    pre_grouped.sort_by(|a, b| a.0.cmp(&b.0) );
-    let intermediate_grouped: HashMap<u64, usize> = pre_grouped.iter().group_by(|rec| rec.0)
-        .into_iter().map(|(chunk_id, values)| (chunk_id, values.fold(0_usize, |acc, v| acc + v.1))).collect();
-        */
-    let mut file_names: Vec<Document> = vec![];
-    for (doc, hash) in intermediate_results {
-        let docvec = vec![doc.clone()];
-        document_collection.borrow_mut().update_collection(&hash, &docvec);
-        file_names.push(doc.clone());
-        pb.inc(hash.len().try_into().unwrap());
-    }
-    // let file_names = to_document_list(intermediate_results);
-    file_names
-}
-
 fn index_directory_parallel(
     start_path: &str,
     document_collection: &RefCell<DocumentCollection>,
 ) -> Vec<Document> {
     let files: Vec<PathBuf> = get_files_from_dir(start_path);
+    let number_of_files: u64 = files.len().try_into().unwrap();
 
-    let pb = create_progress_bar(files.len().try_into().unwrap());
-
-    let intermediate_results: Vec<(Document, HashMap<u64, usize>)> =
+    let pb = create_progress_bar(number_of_files);
+    type HashSender = Sender<(HashMap<u64, usize>, String)>;
+    type HashReceiver = Receiver<(HashMap<u64, usize>, String)>;
+    let (sender, receiver): (HashSender, HashReceiver) = mpsc::channel();
+    let results: Vec<Document> =
         files.par_iter()
-             .flat_map(|file_path|
+             .map_with(sender, |s, file_path|
                             {
                                 match compute_document(&file_path.to_string_lossy()) {
                                     Ok((document, file_frequencies)) => {
                                         pb.inc(1);
-                                        Some((document, file_frequencies))
+                                        s.send((file_frequencies, document.file.clone())).unwrap();
+                                        Some(document)
                                     },
                                     Err(_) => None
                                 }
                             }
                       )
-                      .fold(Vec::new, |mut left, right| {left.push(right); left})
+                      .fold(Vec::new, |mut left, right: Option<Document>| {
+                          if let Some(value) = right {
+                            left.push(value);
+                          }
+                          left})
                       .reduce(Vec::new, |mut left, right| {left.extend(right); left});
+    pb.finish();
+
+    if console::user_attended() {
+        println!("{} Updating the internal dictionary...", style("[2/4]").bold().dim());
+    }
+
+    let new_pb = create_progress_bar(number_of_files);
+    let mut dc = document_collection.borrow_mut();
+    receiver.iter().progress_with(new_pb).for_each(|(hash, name)| {
+        dc.update_collection(&hash, &[name]);
+    });
     pb.finish_and_clear();
-    println!("Intermediate");
-    let results = integrate_results_other(&intermediate_results, document_collection);
-    println!("done");
     results
 }
 
@@ -154,30 +147,22 @@ pub fn index_paths(
         println!("{} Updating statistics...", style("[3/4]").bold().dim());
     }
 
-    let progress_bar = 
-        if console::user_attended() { 
-            ProgressBar::new(results.len().try_into().unwrap())
-        } else { 
-            ProgressBar::hidden() 
-        };
-    let style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
-    progress_bar.set_style(style);
-
+    let progress_bar: ProgressBar = create_progress_bar(results.len().try_into().unwrap());
     let reference_collection = document_collection.borrow().copy();
     let document_collection_mutex = RwLock::new(reference_collection);
-    let updated_results: Vec<Document> = results.par_iter()
-        .map(|doc| {
-            let the_collection = document_collection_mutex.read().unwrap();
-            progress_bar.inc(1);
-            Document {
-                file: doc.file.to_string(),
-                chunks: Vec::new(), // Remove the old chunks, we don't need them anymore
-                digest: the_collection
-                    .compute_document_digest(&doc.chunks),
-            }
-        })
-        .collect();
+    let updated_results: Vec<Document> = 
+        results.into_par_iter()
+               .map(|doc| {
+                   let the_collection = document_collection_mutex.read().unwrap();
+                   progress_bar.inc(1);
+                   Document {
+                       file: doc.file.to_string(),
+                       chunks: Vec::new(), // Remove the old chunks, we don't need them anymore
+                       digest: the_collection
+                           .compute_document_digest(&doc.chunks),
+                   }
+               })
+               .collect();
 
     progress_bar.finish_and_clear();
 
@@ -185,13 +170,13 @@ pub fn index_paths(
         println!("{} Output file database to {}", console::style("[4/4]").bold().dim(), results_file);
     }
 
-    progress_bar.reset();
     // Now start serializing it to a json file.
+    let final_progress = create_progress_bar(updated_results.len().try_into().unwrap());
     let mut output = File::create(results_file)?;
-    for doc in progress_bar.wrap_iter(updated_results.iter()) {
-        output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
-        output.write_all(b"\n")?;
-    }
+    updated_results.iter().progress_with(final_progress).for_each(|doc| {
+        output.write_all(serde_json::to_string(&doc).unwrap().as_bytes());
+        output.write_all(b"\n");
+    });
     Ok(())
 }
 

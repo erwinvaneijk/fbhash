@@ -113,7 +113,9 @@ impl DocumentCollection {
  
     pub fn extend(&mut self, other: &DocumentCollection) {
         self.files.extend(other.files.iter().cloned());
-        self.collection_digests.extend(other.collection_digests.iter().map(|(k,v)| (*k, *v)));
+        for (k, v) in &other.collection_digests {
+            self.collection_digests.entry(*k).and_modify(|e| {*e += v}).or_insert(*v);
+        }
     }
 
     pub fn add_file(&mut self, name: &str) -> io::Result<Option<Document>> {

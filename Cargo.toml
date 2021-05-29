@@ -3,12 +3,22 @@ name = "fbhash"
 version = "0.1.0"
 authors = ["Erwin van Eijk <235739+erwinvaneijk@users.noreply.github.com>"]
 edition = "2018"
+homepage = "https://github.com/erwinvaneijk/fbhash"
 repository = "https://github.com/erwinvaneijk/fbhash"
 description = "A Similarity Hashing Scheme for Digital Forensics"
 readme = "README.md"
+keywords = [
+    "filesystem",
+    "tool",
+    "forensics",
+]
+license = "MIT"
 categories = ["command-line-utilities", "filesystem", "science"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[badges.travis-ci]
+repository = "erwinvaneijk/fbhash"
 
 [[bin]]
 name = "fbhash"
@@ -17,6 +27,7 @@ path = "src/main.rs"
 [profile.release]
 lto = true
 overflow-checks = true
+codegen-units = 1
 panic = "abort"
 
 [dependencies]
@@ -24,15 +35,24 @@ env_logger = "0.8.3"
 itertools = "0.10.0"
 frequency = "^1.0.0"
 frequency-hashmap = "^1.0.0"
-chrono = { version = "0.4.19", features = ["serde"] }
 walkdir = "2"
-serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8.17"
 serde_json = "1.0"
 hash_hasher = "2.0"
-clap = "2.33.3"
 console = "0.14.1"
 indicatif = "0.16.0"
+
+[dependencies.chrono]
+version = "0.4.19"
+features = ["serde"]
+
+[dependencies.clap]
+version = "2.33.3"
+features = ["suggestions", "color", "wrap_help"]
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
 
 [dev-dependencies]
 pretty_assertions = "0.7.1"

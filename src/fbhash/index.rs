@@ -194,17 +194,6 @@ mod tests {
     }
 
     #[test]
-    fn test_large_merges() {
-        let test_vec: Vec<Vec<Document>> =
-            (0..1000).into_iter().map(|_| (0..1000).into_iter().map(|n| Document{file: format!("{}", n), chunks: Vec::with_capacity(1000), digest: vec![]}).collect()).collect();
-        let total_vec: Vec<_> = test_vec.iter().flat_map(|v| v.iter().map(|e| e.file.clone())).collect();
-        assert_eq!(1_000_000, total_vec.len());
-        assert_eq!("0", total_vec[0]);
-        assert_eq!("100", total_vec[100]);
-        assert_eq!("99", total_vec[99])
-    }
-
-    #[test]
     #[cfg(not(target_os = "windows"))]
     fn test_get_files_from_path() {
         let result = get_files_from_dir("testdata");

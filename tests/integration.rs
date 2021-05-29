@@ -19,7 +19,6 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use assert_cmd::prelude::*;
-use predicates::prelude::*;
 use std::process::Command;
 use tempfile::tempdir;
 

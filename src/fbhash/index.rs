@@ -20,6 +20,7 @@
 
 use console::style;
 use std::cell::RefCell;
+use std::io;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use hashbrown::HashMap;
@@ -106,7 +107,7 @@ pub fn index_paths(
     paths: &[&str],
     output_state_file: &str,
     results_file: &str,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     let document_collection = RefCell::new(DocumentCollection::new());
 
     if console::user_attended() {
@@ -157,11 +158,20 @@ pub fn index_paths(
     // Now start serializing it to a json file.
     let final_progress = create_progress_bar(updated_results.len().try_into().unwrap());
     let mut output = File::create(results_file)?;
-    updated_results.iter().progress_with(final_progress).for_each(|doc| {
-        output.write_all(serde_json::to_string(&doc).unwrap().as_bytes());
-        output.write_all(b"\n");
-    });
-    Ok(())
+    let errors: Vec<io::Result<()>> = updated_results.iter().progress_with(final_progress).map(|doc| {
+        if let Err(error) = output.write_all(serde_json::to_string(&doc).unwrap().as_bytes()) {
+            Err(error)
+        } else if let Err(error) = output.write_all(b"\n") {
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }).filter(|e| e.is_err()).collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, errors[0].as_ref().err().unwrap().to_string()))
+    }
 }
 
 #[cfg(test)]

@@ -22,8 +22,6 @@ panic = "abort"
 [dependencies]
 env_logger = "0.8.3"
 itertools = "0.10.0"
-frequency = "^1.0.0"
-frequency-hashmap = "^1.0.0"
 chrono = { version = "0.4.19", features = ["serde"] }
 walkdir = "2"
 serde = { version = "1.0", features = ["derive"] }

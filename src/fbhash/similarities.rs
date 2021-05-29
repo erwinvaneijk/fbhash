@@ -18,12 +18,6 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-extern crate frequency;
-extern crate frequency_hashmap;
-
-use frequency::Frequency;
-use frequency_hashmap::HashMapFrequency;
-use hash_hasher::HashBuildHasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, BTreeMap};
 use hashbrown::HashMap;
@@ -286,23 +280,22 @@ pub fn cosine_distance(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
 mod tests {
     use super::*;
     use crate::fbhash::similarities::cosine_similarity;
-    use frequency::Frequency;
     use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
     use std::fs::File;
     use std::io;
 
-    fn compute_file_frequencies(file: File) -> HashMapFrequency<u64> {
-        let mut frequency_map: HashMapFrequency<u64> = HashMapFrequency::new();
+    fn compute_file_frequencies(file: File) -> HashMap<u64, usize> {
+        let mut frequency_map: HashMap<u64, usize> = HashMap::new();
 
         // This is a roundabout way, because HashMapFrequency needs &u64
         file_to_chunks(file)
             .into_iter()
-            .for_each(|e| frequency_map.increment(e));
+            .for_each(|e| { let _ = frequency_map.entry(e).and_modify(|e| {*e += 1}).or_insert(1); });
 
         frequency_map
     }
 
-    fn compute_scores_from_frequencies(freq_map: &HashMapFrequency<u64>) -> HashMap<u64, f64> {
+    fn compute_scores_from_frequencies(freq_map: &HashMap<u64, usize>) -> HashMap<u64, f64> {
         freq_map
             .into_iter()
             .map(|(k, v)| (*k, 1.0 + (*v as f64).log10()))
@@ -321,8 +314,8 @@ mod tests {
 
         assert_eq!(m.is_empty(), false);
         assert_eq!(m.len(), 2);
-        assert_eq!(m.count(&2879926931474365), 253);
-        assert_eq!(m.count(&33279275454869446), 253);
+        assert_eq!(*m.get(&2879926931474365).unwrap(), 253);
+        assert_eq!(*m.get(&33279275454869446).unwrap(), 253);
         Ok(())
     }
 

@@ -44,36 +44,19 @@ fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-// fn integrate_results(intermediate_results: &[Vec<(Document, HashMap<u64, usize>)>], document_collection: &RefCell<DocumentCollection> ) -> Vec<Document> {
-//     let total_elements: usize = intermediate_results.iter().fold(0, |acc, b| acc + b.len());
-//     let mut results: Vec<Document> = vec![Document{file:String::from(""), chunks:vec![], digest:vec![]}; total_elements];
-//     let mut pos = 0;
-//     println!("Start the loop");
-//     intermediate_results.iter().for_each(|j| {
-//         document_collection.borrow_mut().update_collection(&j);
-//         for i in j {
-//             results[pos] = i.0.clone();
-//             pos += 1;
-//         }
-//         }
-//     );
-//     results
-// }
-
-fn create_progress_bar(len: u64) -> ProgressBar {
-    let pb = 
-        if console::user_attended() {
-            ProgressBar::new(len)
-        } else {
-            ProgressBar::hidden()
-        };
+fn create_progress_bar(size: u64) -> ProgressBar {
+    let pb = if console::user_attended() {
+        ProgressBar::new(size)
+    } else {
+        ProgressBar::hidden()
+    };
     let style = ProgressStyle::default_bar()
-    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
     pb.set_style(style);
     pb
 }
 
-fn index_directory_parallel(
+fn index_directory(
     start_path: &str,
     document_collection: &RefCell<DocumentCollection>,
 ) -> Vec<Document> {
@@ -104,7 +87,7 @@ fn index_directory_parallel(
                           }
                           left})
                       .reduce(Vec::new, |mut left, right| {left.extend(right); left});
-    pb.finish();
+    pb.finish_and_clear();
 
     if console::user_attended() {
         println!("{} Updating the internal dictionary...", style("[2/4]").bold().dim());
@@ -132,13 +115,14 @@ pub fn index_paths(
 
     let mut results: Vec<_> = Vec::new();
     for path in paths.iter() {
-        let mut intermediate_results = index_directory_parallel(path, &document_collection);
+        let mut intermediate_results = index_directory(path, &document_collection);
         results.append(&mut intermediate_results);
     }
 
     if console::user_attended() {
         println!("{} Output the frequencies state...", style("[2/4]").bold().dim());
     }
+
     let mut state_output = File::create(output_state_file)?;
     let doc_ref: &DocumentCollection = &(document_collection.borrow());
     state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
@@ -163,13 +147,13 @@ pub fn index_paths(
                    }
                })
                .collect();
-
     progress_bar.finish_and_clear();
 
     if console::user_attended() {
         println!("{} Output file database to {}", console::style("[4/4]").bold().dim(), results_file);
     }
 
+    progress_bar.reset();
     // Now start serializing it to a json file.
     let final_progress = create_progress_bar(updated_results.len().try_into().unwrap());
     let mut output = File::create(results_file)?;
@@ -232,7 +216,7 @@ mod tests {
         assert!(eq_lists(
             &[
                 Path::new("testdata\\testfile-yes.bin").to_owned(),
-                Path::new("testdata\\testfile-zero-length").to_owned()
+                Path::new("testdata\\testfile-zero-length").to_owned(),
                 Path::new("testdata\\testfile-zero.bin").to_owned(),
             ],
             &result[..]

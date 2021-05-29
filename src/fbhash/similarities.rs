@@ -39,8 +39,11 @@ pub fn file_to_chunks(file: File) -> Vec<u64> {
     chunks
 }
 
-pub fn compute_document_frequencies(doc: &[u64]) -> HashMapFrequency<&u64> {
-    let hmf: HashMapFrequency<&u64> = doc.iter().collect();
+pub fn compute_document_frequencies(doc: &[u64]) -> BTreeMap<&u64, usize> {
+    let mut hmf : BTreeMap<&u64, usize> = BTreeMap::new();
+    for chunk in doc {
+        hmf.entry(&chunk).and_modify(|e| {*e += 1 }).or_insert(1);
+    }
     hmf
 }
 
@@ -93,14 +96,14 @@ pub struct DocumentCollection {
     // TODO:
     // Determine if it's more beneficial to replace it with a strictly ordered data structure
     // in the first place, and take the overhead as a calculated downside.
-    collection_digests: HashMap<u64, usize, HashBuildHasher>,
+    collection_digests: BTreeMap<u64, usize>,
 }
 
 impl DocumentCollection {
     pub fn new() -> DocumentCollection {
         DocumentCollection {
             files: BTreeSet::new(),
-            collection_digests: HashMap::default()
+            collection_digests: BTreeMap::default()
         }
     }
 
@@ -137,7 +140,6 @@ impl DocumentCollection {
     }
 
     pub fn update_collection(&mut self, frequencies: &HashMap<u64, usize>, names: &[String]) -> usize {
-        self.collection_digests.reserve(frequencies.len());
         for (k, v) in frequencies.iter() {
             self.collection_digests.entry(*k).and_modify(|e| {*e += v}).or_insert(*v);
         }
@@ -163,20 +165,16 @@ impl DocumentCollection {
             match entry {
                 None => None,
                 Some(value) => {
-                    let n = self.collection_digests.len() as f64;
                     let count = *value as f64;
-                    let doc_weight = if count > 0.0 {
-                        (n / count).log10()
+                    if *value > 0 && frequency > 0 {
+                        let n = self.collection_digests.len() as f64;
+                        let doc_weight = (n / count).log10();
+                        // Avoid getting infinity as an answer, as it will not serialize well with json
+                        let chunk_weight = (1.0_f64 + frequency as f64).log10();
+                        Some(doc_weight * chunk_weight)
                     } else {
-                        0.0_f64
-                    };
-                    // Avoid getting infinity as an answer, as it will not serialize well with json
-                    let chunk_weight = if frequency > 0 {
-                        (1.0_f64 + frequency as f64).log10()
-                    } else {
-                        0.0_f64
-                    };
-                    Some(doc_weight * chunk_weight)
+                        None
+                    }
                 }
             }
         }
@@ -187,14 +185,13 @@ impl DocumentCollection {
         // let frequencies = compute_document_frequencies(doc.clone());
         // doc.into_iter().map(|chunk| self.compute_chunk_weight(chunk, frequencies.count(&chunk))).collect()
         // This is correct according to my understanding of how TF/IDF works.
+        // Because hashed_doc gets a BTreeMap, it is in sorted order. And because of that
+        // it will also have the same order as the internal state chunks.
         let hashed_doc = compute_document_frequencies(doc);
-        let digest = self
-            .collection_digests
-            .keys()
-            .map(|known_chunk| {
-                (*known_chunk, self.compute_chunk_weight(*known_chunk, hashed_doc.count(&known_chunk)))
-            })
-            .filter(|(_, v)| v.is_some()).map(|(k, v)| (k, v.unwrap())).collect();
+        let digest = hashed_doc.iter().map(|(chunk, count)|
+            (chunk, self.compute_chunk_weight(**chunk, *count))
+            )
+            .filter(|(_, v)| v.is_some()).map(|(k, v)| (**k, v.unwrap())).collect();
         digest
     }
 }
@@ -970,12 +967,12 @@ mod tests {
                 Token::SeqEnd,
                 Token::Str("collection_digests"),
                 Token::Map { len: Some(3) },
-                Token::U64(33279275454869446),
-                Token::U64(253),
-                Token::U64(2879926931474365),
-                Token::U64(253),
                 Token::U64(0),
                 Token::U64(506),
+                Token::U64(2879926931474365),
+                Token::U64(253),
+                Token::U64(33279275454869446),
+                Token::U64(253),
                 Token::MapEnd,
                 Token::StructEnd,
             ],
@@ -994,9 +991,9 @@ mod tests {
                 Token::SeqEnd,
                 Token::Str("collection_digests"),
                 Token::Map { len: Some(3) },
-                Token::U64(33279275454869446),
-                Token::U64(253),
                 Token::U64(2879926931474365),
+                Token::U64(253),
+                Token::U64(33279275454869446),
                 Token::U64(253),
                 Token::U64(0),
                 Token::U64(506),

@@ -18,11 +18,13 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::fbhash::similarities::*;
 use std::cmp::Ordering;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
+
+use crate::fbhash::utils::*;
+use crate::fbhash::similarities::*;
 
 pub fn query_for_results(
     state_path: &str,
@@ -30,11 +32,19 @@ pub fn query_for_results(
     files: &[&str],
     number_of_results: usize,
 ) -> std::result::Result<(), std::io::Error> {
-    println!("Reading database: {}", state_path);
+    if console::user_attended() {
+        println!("Reading database: {}", state_path);
+    }
     let state_file = File::open(state_path)?;
-    let document_collection: DocumentCollection = serde_json::from_reader(state_file)?;
+    let progress_bar = create_progress_bar(state_file.metadata()?.len());
+    let document_collection: DocumentCollection = 
+        serde_json::from_reader(&mut progress_bar.wrap_read(state_file))?;
+    progress_bar.finish_and_clear();
 
-    println!("Reading the database with the files: {}", database_path);
+    if console::user_attended() {
+        println!("Reading the database with the files: {}", database_path);
+    }
+    let spinner = create_progress_spinner();
     let file = BufReader::new(File::open(database_path)?);
     let mut documents: Vec<Document> = Vec::new();
     for line in file.lines() {
@@ -42,6 +52,8 @@ pub fn query_for_results(
             Ok(ok_line) => {
                 let doc: Document = serde_json::from_str(ok_line.as_str()).unwrap();
                 documents.push(doc);
+                spinner.inc(1);
+                spinner.set_message(format!("{:?}", documents.len()));
             }
             Err(v) => panic!("{}", v),
         }
@@ -49,7 +61,9 @@ pub fn query_for_results(
 
     for file_name in files {
         let document = document_collection.compute_digest(file_name).ok().unwrap();
-        let mut results = ranked_search(&document, &documents, number_of_results);
+        let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
+
+        let mut results = ranked_search(&document, &documents, number_of_results, &progress_bar);
         // For better testing purposes, the result is sorted by priority, file,
         // so the output can be predictable.
         results.sort_by(|a, b| {
@@ -61,10 +75,12 @@ pub fn query_for_results(
                 a.1.file.cmp(&b.1.file)
             }
         });
+        println!("Similarities for {}", file_name);
         println!("Results: {}", results.len());
         for result in &results {
             println!("{} => ({}) {}", file_name, result.0, result.1.file);
         }
+        println!();
     }
 
     Ok(())

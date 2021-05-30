@@ -31,9 +31,10 @@ use std::io::prelude::*;
 use std::path::{PathBuf};
 use std::sync::RwLock;
 use rayon::prelude::*;
-use indicatif::{ProgressBar, ProgressStyle, ProgressIterator};
+use indicatif::{ProgressBar, ProgressIterator};
 use walkdir::WalkDir;
 
+use crate::fbhash::utils::*;
 use crate::fbhash::similarities::*;
 
 fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
@@ -43,18 +44,6 @@ fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
         .map(|e| e.ok().unwrap().path().to_owned())
         .filter(|path_name| path_name.is_file())
         .collect()
-}
-
-fn create_progress_bar(size: u64) -> ProgressBar {
-    let pb = if console::user_attended() {
-        ProgressBar::new(size)
-    } else {
-        ProgressBar::hidden()
-    };
-    let style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
-    pb.set_style(style);
-    pb
 }
 
 fn index_directory(

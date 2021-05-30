@@ -86,7 +86,7 @@ fn test_testdata_integration_binary() -> Result<(), Box<dyn std::error::Error>> 
     index_command
         .arg("--binary")
         .arg("index")
-        .arg("-o")
+        .arg("--state")
         .arg(output_state_file.clone())
         .arg(format!("--database={}", database_file.to_str().unwrap()))
         .arg(paths[0]);
@@ -138,9 +138,10 @@ fn test_testdata_format_wrong() -> Result<(), Box<dyn std::error::Error>> {
     index_command
         .arg("--binary")
         .arg("index")
-        .arg("-o")
+        .arg("--state")
         .arg(output_state_file.clone())
-        .arg(format!("--database={}", database_file.to_str().unwrap()))
+        .arg("--database")
+        .arg(database_file.to_str().unwrap())
         .arg(paths[0]);
     index_command.assert().success();
 
@@ -174,7 +175,7 @@ fn test_testdata_format_wrong_json_to_binary() -> Result<(), Box<dyn std::error:
     let mut index_command = Command::cargo_bin("fbhash")?;
     index_command
         .arg("index")
-        .arg("-o")
+        .arg("--state")
         .arg(output_state_file.clone())
         .arg(format!("--database={}", database_file.to_str().unwrap()))
         .arg(paths[0]);

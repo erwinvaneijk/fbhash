@@ -18,10 +18,10 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use hashbrown::HashMap;
 use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, BTreeMap};
-use hashbrown::HashMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io;
 
@@ -35,9 +35,9 @@ pub fn file_to_chunks(file: File) -> Vec<u64> {
 }
 
 pub fn compute_document_frequencies(doc: &[u64]) -> BTreeMap<&u64, usize> {
-    let mut hmf : BTreeMap<&u64, usize> = BTreeMap::new();
+    let mut hmf: BTreeMap<&u64, usize> = BTreeMap::new();
     for chunk in doc {
-        hmf.entry(&chunk).and_modify(|e| {*e += 1 }).or_insert(1);
+        hmf.entry(&chunk).and_modify(|e| *e += 1).or_insert(1);
     }
     hmf
 }
@@ -47,9 +47,12 @@ pub fn compute_document(file_name: &str) -> io::Result<(Document, HashMap<u64, u
     let chunks = file_to_chunks(file);
     let mut file_frequencies: HashMap<u64, usize> = HashMap::new();
     for chunk in chunks.clone() {
-        file_frequencies.entry(chunk).and_modify(|e| {*e += 1}).or_insert(1);
+        file_frequencies
+            .entry(chunk)
+            .and_modify(|e| *e += 1)
+            .or_insert(1);
     }
-    
+
     let doc = Document {
         file: file_name.to_string(),
         chunks,
@@ -98,7 +101,7 @@ impl DocumentCollection {
     pub fn new() -> DocumentCollection {
         DocumentCollection {
             files: BTreeSet::new(),
-            collection_digests: BTreeMap::default()
+            collection_digests: BTreeMap::default(),
         }
     }
 
@@ -109,14 +112,17 @@ impl DocumentCollection {
     pub fn copy(&self) -> DocumentCollection {
         DocumentCollection {
             files: self.files.clone(),
-            collection_digests: self.collection_digests.clone()
+            collection_digests: self.collection_digests.clone(),
         }
     }
- 
+
     pub fn extend(&mut self, other: &DocumentCollection) {
         self.files.extend(other.files.iter().cloned());
         for (k, v) in &other.collection_digests {
-            self.collection_digests.entry(*k).and_modify(|e| {*e += v}).or_insert(*v);
+            self.collection_digests
+                .entry(*k)
+                .and_modify(|e| *e += v)
+                .or_insert(*v);
         }
     }
 
@@ -126,21 +132,31 @@ impl DocumentCollection {
                 Ok((document, file_frequencies)) => {
                     // Update internal state.
                     for (k, v) in file_frequencies {
-                        self.collection_digests.entry(k).and_modify(|e| {*e += v}).or_insert(v);
+                        self.collection_digests
+                            .entry(k)
+                            .and_modify(|e| *e += v)
+                            .or_insert(v);
                     }
                     self.files.insert(name.to_string());
                     Ok(Some(document))
-                },
-                Err(v) => Err(v)
+                }
+                Err(v) => Err(v),
             }
         } else {
             Ok(None)
         }
     }
 
-    pub fn update_collection(&mut self, frequencies: &HashMap<u64, usize>, names: &[String]) -> usize {
+    pub fn update_collection(
+        &mut self,
+        frequencies: &HashMap<u64, usize>,
+        names: &[String],
+    ) -> usize {
         for (k, v) in frequencies.iter() {
-            self.collection_digests.entry(*k).and_modify(|e| {*e += v}).or_insert(*v);
+            self.collection_digests
+                .entry(*k)
+                .and_modify(|e| *e += v)
+                .or_insert(*v);
         }
         self.files.extend(names.iter().cloned());
         self.collection_digests.len()
@@ -187,10 +203,12 @@ impl DocumentCollection {
         // Because hashed_doc gets a BTreeMap, it is in sorted order. And because of that
         // it will also have the same order as the internal state chunks.
         let hashed_doc = compute_document_frequencies(doc);
-        let digest = hashed_doc.iter().map(|(chunk, count)|
-            (chunk, self.compute_chunk_weight(**chunk, *count))
-            )
-            .filter(|(_, v)| v.is_some()).map(|(k, v)| (**k, v.unwrap())).collect();
+        let digest = hashed_doc
+            .iter()
+            .map(|(chunk, count)| (chunk, self.compute_chunk_weight(**chunk, *count)))
+            .filter(|(_, v)| v.is_some())
+            .map(|(k, v)| (**k, v.unwrap()))
+            .collect();
         digest
     }
 }
@@ -230,15 +248,21 @@ impl std::hash::Hash for DocumentCollection {
     }
 }
 
-pub fn ranked_search(doc: &[(u64, f64)], 
-                     documents: &[Document], 
-                     k: usize,
-                     progress: &ProgressBar
-                    ) -> Vec<(f64, Document)> {
+pub fn ranked_search(
+    doc: &[(u64, f64)],
+    documents: &[Document],
+    k: usize,
+    progress: &ProgressBar,
+) -> Vec<(f64, Document)> {
     let mut queue = Heap::new(k);
     documents
         .iter()
-        .map(|other_doc| (other_doc, {progress.inc(1); cosine_distance(&other_doc.digest, doc)}))
+        .map(|other_doc| {
+            (other_doc, {
+                progress.inc(1);
+                cosine_distance(&other_doc.digest, doc)
+            })
+        })
         .for_each(|(d, score)| {
             let _ = queue.insert(score, d);
         });
@@ -257,26 +281,30 @@ pub fn cosine_similarity(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
     if vec1.is_empty() || vec2.is_empty() {
         return if vec1.len() == vec1.len() { 0. } else { 1. };
     }
-    let mut coll: BTreeMap<u64, (Option<f64>, Option<f64>)> 
-        = vec1.iter().map(|(k, v)| (*k, (Some(*v), None))).collect();
-    
+    let mut coll: BTreeMap<u64, (Option<f64>, Option<f64>)> =
+        vec1.iter().map(|(k, v)| (*k, (Some(*v), None))).collect();
+
     vec2.iter().for_each(|(k, v)| {
         coll.entry(*k)
-            .and_modify(|e| e.1 = Some(*v)).or_insert((None, Some(*v)));
+            .and_modify(|e| e.1 = Some(*v))
+            .or_insert((None, Some(*v)));
     });
 
-    let (norm_a, norm_b, norm_prod)  =
-    coll.values().fold(
+    let (norm_a, norm_b, norm_prod) = coll.values().fold(
         (0_f64, 0_f64, 0_f64),
         |(norm_a, norm_b, norm_prod), (n1, n2)| {
             if n1.is_some() && n2.is_some() {
-                (norm_a + n1.unwrap() * n1.unwrap(), norm_b + n2.unwrap() * n2.unwrap(), norm_prod + n1.unwrap() * n2.unwrap())
+                (
+                    norm_a + n1.unwrap() * n1.unwrap(),
+                    norm_b + n2.unwrap() * n2.unwrap(),
+                    norm_prod + n1.unwrap() * n2.unwrap(),
+                )
             } else if n1.is_some() {
-                (norm_a + n1.unwrap() * n1.unwrap(), norm_b , norm_prod)
+                (norm_a + n1.unwrap() * n1.unwrap(), norm_b, norm_prod)
             } else {
-                (norm_a, norm_b + n2.unwrap() * n2.unwrap() , norm_prod)
+                (norm_a, norm_b + n2.unwrap() * n2.unwrap(), norm_prod)
             }
-        }
+        },
     );
     norm_prod / (norm_a.sqrt() * norm_b.sqrt())
 }
@@ -297,9 +325,9 @@ mod tests {
         let mut frequency_map: HashMap<u64, usize> = HashMap::new();
 
         // This is a roundabout way, because HashMapFrequency needs &u64
-        file_to_chunks(file)
-            .into_iter()
-            .for_each(|e| { let _ = frequency_map.entry(e).and_modify(|e| {*e += 1}).or_insert(1); });
+        file_to_chunks(file).into_iter().for_each(|e| {
+            let _ = frequency_map.entry(e).and_modify(|e| *e += 1).or_insert(1);
+        });
 
         frequency_map
     }
@@ -928,11 +956,11 @@ mod tests {
                 Token::SeqEnd,
                 Token::Str("digest"),
                 Token::Seq { len: Some(2) },
-                Token::Tuple { len: 2},
+                Token::Tuple { len: 2 },
                 Token::U64(2879926931474365),
                 Token::F64(-5.055178171138189),
                 Token::TupleEnd,
-                Token::Tuple { len: 2},
+                Token::Tuple { len: 2 },
                 Token::U64(33279275454869446),
                 Token::F64(-5.055178171138189),
                 Token::TupleEnd,

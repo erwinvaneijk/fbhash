@@ -27,30 +27,8 @@ pub fn create_progress_bar(size: u64) -> ProgressBar {
         ProgressBar::hidden()
     };
     let style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+        .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
     pb.set_style(style);
     pb.set_draw_delta(size / 100);
     pb
-}
-
-pub fn create_progress_spinner() -> ProgressBar {
-    if console::user_attended() {
-        let pb = ProgressBar::new_spinner();
-        let style = ProgressStyle::default_spinner()            
-            .tick_strings(&[
-                    "▹▹▹▹▹",
-                    "▸▹▹▹▹",
-                    "▹▸▹▹▹",
-                    "▹▹▸▹▹",
-                    "▹▹▹▸▹",
-                    "▹▹▹▹▸",
-                    "▪▪▪▪▪",
-                ])
-                .template("[{elapsed_precise}] {spinner:.blue} {msg}");
-        pb.set_style(style);
-        pb.enable_steady_tick(1_000);
-        pb
-    } else {
-        ProgressBar::hidden()
-    }
 }

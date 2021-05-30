@@ -32,11 +32,9 @@ pub fn query_for_results(
     files: &[&str],
     number_of_results: usize,
 ) -> std::result::Result<(), std::io::Error> {
-    if console::user_attended() {
-        println!("Reading database: {}", state_path);
-    }
     let state_file = File::open(state_path)?;
     let progress_bar = create_progress_bar(state_file.metadata()?.len());
+    progress_bar.println(format!("Reading database: {}", state_path));
     let document_collection: DocumentCollection = 
         serde_json::from_reader(&mut progress_bar.wrap_read(state_file))?;
     progress_bar.finish_and_clear();
@@ -44,25 +42,26 @@ pub fn query_for_results(
     if console::user_attended() {
         println!("Reading the database with the files: {}", database_path);
     }
-    let spinner = create_progress_spinner();
+    let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
     let file = BufReader::new(File::open(database_path)?);
     let mut documents: Vec<Document> = Vec::new();
     for line in file.lines() {
         match line {
             Ok(ok_line) => {
                 let doc: Document = serde_json::from_str(ok_line.as_str()).unwrap();
-                documents.push(doc);
-                spinner.inc(1);
-                spinner.set_message(format!("{:?}", documents.len()));
+                documents.push(doc.clone());
+                progress_bar.inc(1);
+                progress_bar.set_message(format!("{:?}", doc.file.as_str()));
             }
             Err(v) => panic!("{}", v),
         }
     }
+    progress_bar.finish_and_clear();
 
     for file_name in files {
         let document = document_collection.compute_digest(file_name).ok().unwrap();
         let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
-
+        progress_bar.println("Compute the files that are most similar in the set");
         let mut results = ranked_search(&document, &documents, number_of_results, &progress_bar);
         // For better testing purposes, the result is sorted by priority, file,
         // so the output can be predictable.
@@ -75,6 +74,7 @@ pub fn query_for_results(
                 a.1.file.cmp(&b.1.file)
             }
         });
+        progress_bar.finish_and_clear();
         println!("Similarities for {}", file_name);
         println!("Results: {}", results.len());
         for result in &results {

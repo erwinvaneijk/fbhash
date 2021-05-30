@@ -34,7 +34,7 @@ fn test_testdata_integration() -> Result<(), Box<dyn std::error::Error>> {
     let mut index_command = Command::cargo_bin("fbhash")?;
     index_command
         .arg("index")
-        .arg("-o")
+        .arg("--state")
         .arg(output_state_file.clone())
         .arg("--database")
         .arg(database_file.to_str().unwrap())

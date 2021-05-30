@@ -19,6 +19,7 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use hashbrown::HashMap;
+use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -102,6 +103,10 @@ impl DocumentCollection {
             files: BTreeSet::new(),
             collection_digests: BTreeMap::default(),
         }
+    }
+
+    pub fn number_of_files(&self) -> usize {
+        self.files.len()
     }
 
     pub fn copy(&self) -> DocumentCollection {
@@ -243,17 +248,27 @@ impl std::hash::Hash for DocumentCollection {
     }
 }
 
-pub fn ranked_search(doc: &[(u64, f64)], documents: &[Document], k: usize) -> Vec<(f64, Document)> {
+pub fn ranked_search(
+    doc: &[(u64, f64)],
+    documents: &[Document],
+    k: usize,
+    progress: &ProgressBar,
+) -> Vec<(f64, Document)> {
     let mut queue = Heap::new(k);
     documents
         .iter()
-        .map(|other_doc| (other_doc, cosine_distance(&other_doc.digest, doc)))
+        .map(|other_doc| {
+            (other_doc, {
+                progress.inc(1);
+                cosine_distance(&other_doc.digest, doc)
+            })
+        })
         .for_each(|(d, score)| {
             let _ = queue.insert(score, d);
         });
     let mut result = Vec::new();
-    for i in queue.get_elements() {
-        result.push((i.0, i.1.clone()));
+    for (similarity, doc) in queue.get_elements() {
+        result.push((similarity, doc.clone()));
     }
     result
 }

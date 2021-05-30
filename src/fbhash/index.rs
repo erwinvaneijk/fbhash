@@ -28,13 +28,14 @@ use std::io::prelude::*;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 
-use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
+use indicatif::{ProgressBar, ProgressIterator};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use std::sync::RwLock;
 use walkdir::WalkDir;
 
 use crate::fbhash::similarities::*;
+use crate::fbhash::utils::*;
 
 fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
     WalkDir::new(start_path)
@@ -43,18 +44,6 @@ fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
         .map(|e| e.ok().unwrap().path().to_owned())
         .filter(|path_name| path_name.is_file())
         .collect()
-}
-
-fn create_progress_bar(size: u64) -> ProgressBar {
-    let pb = if console::user_attended() {
-        ProgressBar::new(size)
-    } else {
-        ProgressBar::hidden()
-    };
-    let style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
-    pb.set_style(style);
-    pb
 }
 
 fn index_directory(

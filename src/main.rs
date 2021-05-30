@@ -46,14 +46,14 @@ fn main() -> std::io::Result<()> {
                 )
                 .arg(
                     Arg::with_name("STATE_FILE")
-                        .short("o")
+                        .long("state")
+                        .short("s")
                         .value_name("STATE_FILE")
                         .takes_value(true),
                 )
                 .arg(
                     Arg::with_name("DATABASE_FILE")
                         .long("database")
-                        .require_equals(true)
                         .short("d")
                         .value_name("DATABASE_FILE")
                         .takes_value(true),

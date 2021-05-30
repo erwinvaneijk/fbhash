@@ -1,6 +1,8 @@
 # FBHash[1] : A New Similarity Hashing Scheme for Digital Forensics 
 ## [D. Chang et al. / Digital Investigation 29 (2019) S113eS123]
 
+[![Build Status](https://www.travis-ci.com/erwinvaneijk/fbhash.svg?branch=main)](https://www.travis-ci.com/erwinvaneijk/fbhash)
+
 This is an implementation of the paper in Rust. Nino Stephen made an implementation in Python (https://github.com/ninostephen/fbhash). Part of the following description I have adapted from 
 his description.
 
@@ -82,5 +84,23 @@ Where x is the document number (that is 1 and 2 in D1 and D2 respectively)
 
 #### digest(D1) = W<sup>D</sup><sub>1</sub>C<sub>0</sub>, W<sup>D</sup><sub>1</sub>C<sup>2</sup>, ..., W<sup>D</sup><sub>1</sub>C<sub>h-1</sub>
 
+## Usage
+
+First you have to index the files you want to compare to:
+
+```
+fbhash index --state state.json --database=database.json <The directories and/or files to index>
+```
+
+Then you can query the eight files that are closest by using:
+```
+fbhash query -n 8 database.json state.json <The files you want to have compared>
+```
+Obviously, you can change the number of documents returned with adjusting the `8` to any other number.
+
+Also, to get help on all available options:
+```
+fbhash help
+```
 
 [1] FbHash: A New Similarity Hashing Scheme for Digital Forensics, Donghoon Chang, Mohona Ghosh, Somitra Kumar Sanadhya, Monika, Singh, and Douglas R. White.

@@ -36,7 +36,8 @@ fn test_testdata_integration() -> Result<(), Box<dyn std::error::Error>> {
         .arg("index")
         .arg("-o")
         .arg(output_state_file.clone())
-        .arg(format!("--database={}", database_file.to_str().unwrap()))
+        .arg("--database")
+        .arg(database_file.to_str().unwrap())
         .arg(paths[0]);
     index_command.assert().success();
 

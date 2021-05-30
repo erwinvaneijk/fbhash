@@ -20,6 +20,11 @@
 
 use indicatif::{ProgressBar, ProgressStyle};
 
+pub enum OutputFormat {
+    Json,
+    Binary
+}
+
 pub fn create_progress_bar(size: u64) -> ProgressBar {
     let pb = if console::user_attended() {
         ProgressBar::new(size)

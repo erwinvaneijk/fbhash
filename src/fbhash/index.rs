@@ -46,6 +46,40 @@ fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+// Write the results to a binary file.
+fn write_database_state_binary(results: &[Document], results_file: &str) -> io::Result<()> {
+    let output = File::create(results_file)?;
+    bincode::serialize_into(output, &results).unwrap();
+    Ok(())
+}
+
+fn write_database_state(updated_results: &[Document], results_file: &str) -> io::Result<()> {
+    let final_progress = create_progress_bar(updated_results.len().try_into().unwrap());
+    let mut output = File::create(results_file)?;
+    let errors: Vec<io::Result<()>> = updated_results
+        .iter()
+        .progress_with(final_progress)
+        .map(|doc| {
+            if let Err(error) = output.write_all(serde_json::to_string(&doc).unwrap().as_bytes()) {
+                Err(error)
+            } else if let Err(error) = output.write_all(b"\n") {
+                Err(error)
+            } else {
+                Ok(())
+            }
+        })
+        .filter(|e| e.is_err())
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            errors[0].as_ref().err().unwrap().to_string(),
+        ))
+    }
+}
+
 fn index_directory(
     start_path: &str,
     document_collection: &RefCell<DocumentCollection>,
@@ -100,7 +134,7 @@ fn index_directory(
     results
 }
 
-pub fn index_paths(paths: &[&str], output_state_file: &str, results_file: &str) -> io::Result<()> {
+pub fn index_paths(paths: &[&str], output_state_file: &str, results_file: &str, output_format: OutputFormat) -> io::Result<()> {
     let document_collection = RefCell::new(DocumentCollection::new());
 
     if console::user_attended() {
@@ -125,7 +159,12 @@ pub fn index_paths(paths: &[&str], output_state_file: &str, results_file: &str) 
 
     let mut state_output = File::create(output_state_file)?;
     let doc_ref: &DocumentCollection = &(document_collection.borrow());
-    state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?;
+    match output_format {
+        OutputFormat::Json =>
+            state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?,
+        OutputFormat::Binary =>
+            bincode::serialize_into(state_output, doc_ref).unwrap()
+    }
 
     if console::user_attended() {
         println!("{} Updating statistics...", style("[3/4]").bold().dim());
@@ -157,30 +196,11 @@ pub fn index_paths(paths: &[&str], output_state_file: &str, results_file: &str) 
     }
 
     progress_bar.reset();
-    // Now start serializing it to a json file.
-    let final_progress = create_progress_bar(updated_results.len().try_into().unwrap());
-    let mut output = File::create(results_file)?;
-    let errors: Vec<io::Result<()>> = updated_results
-        .iter()
-        .progress_with(final_progress)
-        .map(|doc| {
-            if let Err(error) = output.write_all(serde_json::to_string(&doc).unwrap().as_bytes()) {
-                Err(error)
-            } else if let Err(error) = output.write_all(b"\n") {
-                Err(error)
-            } else {
-                Ok(())
-            }
-        })
-        .filter(|e| e.is_err())
-        .collect();
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            errors[0].as_ref().err().unwrap().to_string(),
-        ))
+    match output_format {
+        OutputFormat::Json =>
+            write_database_state(&updated_results, results_file),
+        OutputFormat::Binary =>
+            write_database_state_binary(&updated_results, results_file)
     }
 }
 

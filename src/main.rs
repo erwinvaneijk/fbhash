@@ -29,12 +29,25 @@ mod fbhash;
 use clap::{App, Arg, SubCommand};
 use fbhash::index::*;
 use fbhash::query::*;
+use fbhash::utils::OutputFormat;
 
 fn main() -> std::io::Result<()> {
     let matches = App::new("fbhash")
         .version("0.1.0")
         .author("Erwin van Eijk")
         .about("Find near duplicates of files")
+        .arg(Arg::with_name("json")
+             .short("j")
+             .long("json")
+             .takes_value(false)
+             .help("Output the results in json format")
+        )
+        .arg(Arg::with_name("binary")
+             .short("b")
+             .long("binary")
+             .takes_value(false)
+             .help("Output the results in a binary format")
+        )
         .subcommand(
             SubCommand::with_name("index")
                 .arg(
@@ -93,7 +106,13 @@ fn main() -> std::io::Result<()> {
                 ),
         )
         .get_matches();
-
+    
+    let output_format = 
+        if matches.is_present("binary") {
+            OutputFormat::Binary
+        } else {
+            OutputFormat::Json
+        };
     if let Some(subcommand_matches) = matches.subcommand_matches("index") {
         let paths: Vec<_> = subcommand_matches.values_of("INPUT").unwrap().collect();
         let output_state_file = subcommand_matches
@@ -103,7 +122,7 @@ fn main() -> std::io::Result<()> {
             .value_of("DATABASE_FILE")
             .unwrap_or("database.json");
 
-        index_paths(&paths, output_state_file, results_file)?;
+        index_paths(&paths, output_state_file, results_file, output_format)?;
     } else if let Some(query_subcommand_matches) = matches.subcommand_matches("query") {
         let files: Vec<_> = query_subcommand_matches
             .values_of("FILE_TO_QUERY")
@@ -120,7 +139,7 @@ fn main() -> std::io::Result<()> {
                 v
             ),
             Ok(number_of_results) => {
-                query_for_results(state_path, database_path, &files, number_of_results)?
+                query_for_results(state_path, database_path, &files, number_of_results, output_format)?
             }
         }
     }

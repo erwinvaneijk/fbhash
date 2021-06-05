@@ -26,24 +26,8 @@ use std::io::BufReader;
 use crate::fbhash::utils::*;
 use crate::fbhash::similarities::*;
 
-pub fn query_for_results(
-    state_path: &str,
-    database_path: &str,
-    files: &[&str],
-    number_of_results: usize,
-) -> std::result::Result<(), std::io::Error> {
-    let state_file = File::open(state_path)?;
-    let progress_bar = create_progress_bar(state_file.metadata()?.len());
-    progress_bar.println(format!("Reading database: {}", state_path));
-    let document_collection: DocumentCollection = 
-        serde_json::from_reader(&mut progress_bar.wrap_read(state_file))?;
-    progress_bar.finish_and_clear();
-
-    if console::user_attended() {
-        println!("Reading the database with the files: {}", database_path);
-    }
-    let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
-    let file = BufReader::new(File::open(database_path)?);
+fn read_database_in_json<R: BufRead>(file: &mut R, expected_files: usize) -> Result<Vec<Document>, std::io::Error> {
+    let progress_bar = create_progress_bar(expected_files as u64);
     let mut documents: Vec<Document> = Vec::new();
     for line in file.lines() {
         match line {
@@ -57,6 +41,48 @@ pub fn query_for_results(
         }
     }
     progress_bar.finish_and_clear();
+    Ok(documents)
+}
+
+fn read_database_binary<R: BufRead>(file: &mut R, expected_files: usize) -> Result<Vec<Document>, std::io::Error> {
+    let progress_bar = create_progress_bar(expected_files as u64);
+    let documents: Vec<Document> = bincode::deserialize_from(progress_bar.wrap_read(file)).unwrap();
+    progress_bar.finish_and_clear();
+    Ok(documents)
+}
+
+pub fn query_for_results(
+    state_path: &str,
+    database_path: &str,
+    files: &[&str],
+    number_of_results: usize,
+    output_format: OutputFormat
+) -> std::result::Result<(), std::io::Error> {
+    let state_file = File::open(state_path)?;
+    let progress_bar = create_progress_bar(state_file.metadata()?.len());
+    progress_bar.println(format!("Reading database: {}", state_path));
+    let document_collection: DocumentCollection = 
+        match output_format {
+            OutputFormat::Json =>
+                serde_json::from_reader(&mut progress_bar.wrap_read(state_file))?,
+            OutputFormat::Binary =>
+                bincode::deserialize_from(&mut progress_bar.wrap_read(state_file)).unwrap()
+        };
+    progress_bar.finish_and_clear();
+
+    if console::user_attended() {
+        println!("Reading the database with the files: {}", database_path);
+    }
+    let inner_file = File::open(database_path)?;
+    let expected_length = inner_file.metadata()?.len();
+    let mut file = BufReader::new(inner_file);
+    let documents: Vec<Document> =
+        match output_format {
+            OutputFormat::Json =>
+                read_database_in_json(&mut file, document_collection.number_of_files())?,
+            OutputFormat::Binary =>
+                read_database_binary(&mut file, expected_length as usize)?
+        };
 
     for file_name in files {
         let document = document_collection.compute_digest(file_name).ok().unwrap();

@@ -18,6 +18,7 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use hashbrown::HashSet;
 use std::cmp::Ordering;
 use std::fs::File;
 use std::io::BufRead;
@@ -51,13 +52,22 @@ fn read_database_binary<R: BufRead>(file: &mut R, expected_files: usize) -> Resu
     Ok(documents)
 }
 
-pub fn query_for_results(
+fn verify_consistency(_document_collection: &DocumentCollection, _documents: &[Document]) -> bool {
+    let document_name_set: HashSet<String> = _documents.iter().map(|d| d.file.clone()).collect();
+    let all_collection_in_documents = _document_collection.get_files().iter().all(|f| {
+        document_name_set.contains(f)
+    });
+    let all_documents_in_collection = _documents.iter().all(|d| {
+        _document_collection.exists_file(&d.file)
+    });
+    all_collection_in_documents && all_documents_in_collection
+}
+
+fn open_state_and_database(
     state_path: &str,
     database_path: &str,
-    files: &[&str],
-    number_of_results: usize,
     output_format: OutputFormat
-) -> std::result::Result<(), std::io::Error> {
+) -> Result<(DocumentCollection, Vec<Document>), std::io::Error> {
     let state_file = File::open(state_path)?;
     let progress_bar = create_progress_bar(state_file.metadata()?.len());
     progress_bar.println(format!("Reading database: {}", state_path));
@@ -83,7 +93,21 @@ pub fn query_for_results(
             OutputFormat::Binary =>
                 read_database_binary(&mut file, expected_length as usize)?
         };
+    if ! verify_consistency(&document_collection, &documents) {
+        Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{} and {} are not consistent", state_path, database_path)))
+    } else {
+        Ok((document_collection, documents))
+    }
+}
 
+pub fn query_for_results(
+    state_path: &str,
+    database_path: &str,
+    files: &[&str],
+    number_of_results: usize,
+    output_format: OutputFormat
+) -> std::result::Result<(), std::io::Error> {
+    let (document_collection, documents) = open_state_and_database(state_path, database_path, output_format)?;
     for file_name in files {
         let document = document_collection.compute_digest(file_name).ok().unwrap();
         let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);

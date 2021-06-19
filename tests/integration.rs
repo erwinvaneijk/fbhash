@@ -199,3 +199,56 @@ fn test_testdata_format_wrong_json_to_binary() -> Result<(), Box<dyn std::error:
     dir.close()?;
     Ok(())
 }
+
+#[test]
+fn test_testdata_wrong_combo() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = tempdir()?;
+    let output_state_file = dir.path().join("output_state_file.bin");
+    let second_output_state_file = dir.path().join("second_output_state_file.bin");
+    let database_file = dir.path().join("database.bin");
+    let second_database_file = dir.path().join("second_database.bin");
+    let paths = vec!["testdata"];
+    let files = vec!["testdata/testfile-yes.bin"];
+    let number_of_results = 5;
+
+    let mut index_command = Command::cargo_bin("fbhash")?;
+    index_command
+        .arg("--binary")
+        .arg("index")
+        .arg("--state")
+        .arg(output_state_file.clone())
+        .arg("--database")
+        .arg(database_file.to_str().unwrap())
+        .arg(paths[0]);
+    index_command.assert().success();
+
+    let temp_path_str: Option<&str> = dir.path().to_str();
+    if temp_path_str.is_none() {
+        panic!("Cannot convert path {:?}", dir.path());
+    }
+
+    let mut second_index_command = Command::cargo_bin("fbhash")?;
+    second_index_command
+        .arg("--binary")
+        .arg("index")
+        .arg("--state")
+        .arg(second_output_state_file.clone())
+        .arg("--database")
+        .arg(second_database_file.to_str().unwrap())
+        .arg(temp_path_str.unwrap());
+    second_index_command.assert().success();
+
+    let mut query_command = Command::cargo_bin("fbhash")?;
+    query_command
+        .arg("--binary")
+        .arg("query")
+        .arg(format!("-n={}", number_of_results))
+        .arg(database_file.clone())
+        .arg(second_output_state_file.clone())
+        .arg(files[0]);
+
+    query_command.assert().failure().stderr(format!("Error: Custom {{ kind: InvalidInput, error: \"{} and {} are not consistent\" }}\n", second_output_state_file.to_str().unwrap(), database_file.to_str().unwrap()));
+
+    dir.close()?;
+    Ok(())
+}

@@ -105,6 +105,10 @@ impl DocumentCollection {
         }
     }
 
+    pub fn get_files(&self) -> &BTreeSet<String> {
+        &self.files
+    }
+
     pub fn number_of_files(&self) -> usize {
         self.files.len()
     }

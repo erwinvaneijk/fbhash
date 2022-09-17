@@ -24,6 +24,7 @@ extern crate pretty_assertions;
 #[cfg(test)]
 #[macro_use]
 extern crate float_cmp;
+extern crate clap;
 mod fbhash;
 
 use clap::{App, Arg, SubCommand};
@@ -36,17 +37,19 @@ fn main() -> std::io::Result<()> {
         .version("0.1.0")
         .author("Erwin van Eijk")
         .about("Find near duplicates of files")
-        .arg(Arg::with_name("json")
-             .short("j")
-             .long("json")
-             .takes_value(false)
-             .help("Output the results in json format")
+        .arg(
+            Arg::with_name("json")
+                .short('j')
+                .long("json")
+                .takes_value(false)
+                .help("Output the results in json format"),
         )
-        .arg(Arg::with_name("binary")
-             .short("b")
-             .long("binary")
-             .takes_value(false)
-             .help("Output the results in a binary format")
+        .arg(
+            Arg::with_name("binary")
+                .short('b')
+                .long("binary")
+                .takes_value(false)
+                .help("Output the results in a binary format"),
         )
         .subcommand(
             SubCommand::with_name("index")
@@ -60,14 +63,14 @@ fn main() -> std::io::Result<()> {
                 .arg(
                     Arg::with_name("STATE_FILE")
                         .long("state")
-                        .short("s")
+                        .short('s')
                         .value_name("STATE_FILE")
                         .takes_value(true),
                 )
                 .arg(
                     Arg::with_name("DATABASE_FILE")
                         .long("database")
-                        .short("d")
+                        .short('d')
                         .value_name("DATABASE_FILE")
                         .takes_value(true),
                 ),
@@ -76,7 +79,7 @@ fn main() -> std::io::Result<()> {
             SubCommand::with_name("query")
                 .arg(
                     Arg::with_name("RESULT_SIZE")
-                        .short("n")
+                        .short('n')
                         .long("number")
                         .required(false)
                         .require_equals(true)
@@ -106,13 +109,12 @@ fn main() -> std::io::Result<()> {
                 ),
         )
         .get_matches();
-    
-    let output_format = 
-        if matches.is_present("binary") {
-            OutputFormat::Binary
-        } else {
-            OutputFormat::Json
-        };
+
+    let output_format = if matches.is_present("binary") {
+        OutputFormat::Binary
+    } else {
+        OutputFormat::Json
+    };
     if let Some(subcommand_matches) = matches.subcommand_matches("index") {
         let paths: Vec<_> = subcommand_matches.values_of("INPUT").unwrap().collect();
         let output_state_file = subcommand_matches
@@ -138,9 +140,13 @@ fn main() -> std::io::Result<()> {
                 "Not a valid numerical value found for result_size argument {}",
                 v
             ),
-            Ok(number_of_results) => {
-                query_for_results(state_path, database_path, &files, number_of_results, output_format)?
-            }
+            Ok(number_of_results) => query_for_results(
+                state_path,
+                database_path,
+                &files,
+                number_of_results,
+                output_format,
+            )?,
         }
     }
     Ok(())

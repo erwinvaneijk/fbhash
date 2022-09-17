@@ -46,7 +46,7 @@ version = "0.4.19"
 features = ["serde"]
 
 [dependencies.clap]
-version = "2.33.3"
+version = "3.2.22"
 features = ["suggestions", "color", "wrap_help"]
 
 [dependencies.serde]
@@ -62,7 +62,7 @@ version = "0.11.2"
 features = ["serde", "rayon"]
 
 [dev-dependencies]
-pretty_assertions = "0.7.1"
+pretty_assertions = "1.3.0"
 float-cmp = "0.8.0"
 serde_test = "1.0"
 tempfile = "3"

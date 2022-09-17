@@ -37,7 +37,7 @@ pub fn file_to_chunks(file: File) -> Vec<u64> {
 pub fn compute_document_frequencies(doc: &[u64]) -> BTreeMap<&u64, usize> {
     let mut hmf: BTreeMap<&u64, usize> = BTreeMap::new();
     for chunk in doc {
-        hmf.entry(&chunk).and_modify(|e| *e += 1).or_insert(1);
+        hmf.entry(chunk).and_modify(|e| *e += 1).or_insert(1);
     }
     hmf
 }
@@ -120,6 +120,7 @@ impl DocumentCollection {
         }
     }
 
+    #[allow(dead_code)]
     pub fn extend(&mut self, other: &DocumentCollection) {
         self.files.extend(other.files.iter().cloned());
         for (k, v) in &other.collection_digests {
@@ -130,6 +131,7 @@ impl DocumentCollection {
         }
     }
 
+    #[allow(dead_code)]
     pub fn add_file(&mut self, name: &str) -> io::Result<Option<Document>> {
         if !self.exists_file(name) {
             match compute_document(name) {
@@ -388,6 +390,23 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn test_update_collection() -> io::Result<()> {
+        let name = String::from("testdata/testfile-yes.bin");
+        let hash: HashMap<u64, usize> = match compute_document(&name.clone()) {
+            Ok((_document, file_frequencies)) => file_frequencies,
+            Err(_) => HashMap::new(),
+        };
+        let mut document_collection = DocumentCollection::new();
+        document_collection.update_collection(&hash, &[name.clone()]);
+
+        assert!(document_collection.exists_file(&name.clone()));
+        assert!(!document_collection.collection_digests.is_empty());
+        let doc_vector = document_collection.compute_digest(&name.clone())?;
+        assert_eq!(doc_vector.len(), 2);
+        Ok(())
     }
 
     #[test]

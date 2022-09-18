@@ -22,7 +22,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 pub enum OutputFormat {
     Json,
-    Binary
+    Binary,
 }
 
 pub fn create_progress_bar(size: u64) -> ProgressBar {

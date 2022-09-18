@@ -134,7 +134,12 @@ fn index_directory(
     results
 }
 
-pub fn index_paths(paths: &[&str], output_state_file: &str, results_file: &str, output_format: OutputFormat) -> io::Result<()> {
+pub fn index_paths(
+    paths: &[&str],
+    output_state_file: &str,
+    results_file: &str,
+    output_format: OutputFormat,
+) -> io::Result<()> {
     let document_collection = RefCell::new(DocumentCollection::new());
 
     if console::user_attended() {
@@ -160,10 +165,10 @@ pub fn index_paths(paths: &[&str], output_state_file: &str, results_file: &str, 
     let mut state_output = File::create(output_state_file)?;
     let doc_ref: &DocumentCollection = &(document_collection.borrow());
     match output_format {
-        OutputFormat::Json =>
-            state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?,
-        OutputFormat::Binary =>
-            bincode::serialize_into(state_output, doc_ref).unwrap()
+        OutputFormat::Json => {
+            state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?
+        }
+        OutputFormat::Binary => bincode::serialize_into(state_output, doc_ref).unwrap(),
     }
 
     if console::user_attended() {
@@ -197,16 +202,15 @@ pub fn index_paths(paths: &[&str], output_state_file: &str, results_file: &str, 
 
     progress_bar.reset();
     match output_format {
-        OutputFormat::Json =>
-            write_database_state(&updated_results, results_file),
-        OutputFormat::Binary =>
-            write_database_state_binary(&updated_results, results_file)
+        OutputFormat::Json => write_database_state(&updated_results, results_file),
+        OutputFormat::Binary => write_database_state_binary(&updated_results, results_file),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
     use std::path::Path;
 
     // TODO:

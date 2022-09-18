@@ -116,6 +116,8 @@ impl<'a, T> Heap<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
+
     #[test]
     fn test_insert() {
         let mut h = Heap::new(10);

@@ -323,6 +323,7 @@ pub fn cosine_distance(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
 mod tests {
     use super::*;
     use crate::fbhash::similarities::cosine_similarity;
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
     use std::fs::File;
     use std::io;
@@ -355,7 +356,7 @@ mod tests {
         let f = File::open("testdata/testfile-yes.bin")?;
         let m = compute_file_frequencies(f);
 
-        assert_eq!(m.is_empty(), false);
+        assert_ne!(m.is_empty(), true);
         assert_eq!(m.len(), 2);
         assert_eq!(*m.get(&2879926931474365).unwrap(), 253);
         assert_eq!(*m.get(&33279275454869446).unwrap(), 253);

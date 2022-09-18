@@ -150,6 +150,7 @@ impl Iterator for ChunkIterator {
 #[cfg(test)]
 mod tests {
     use super::ChunkIterator;
+    use pretty_assertions::assert_eq;
     use std::fs::File;
     use std::io;
 

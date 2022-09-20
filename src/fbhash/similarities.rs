@@ -270,7 +270,7 @@ pub fn ranked_search(
             })
         })
         .for_each(|(d, score)| {
-            let _ = queue.insert(score, d);
+            queue.insert(score, d);
         });
     let mut result = Vec::new();
     for (similarity, doc) in queue.get_elements() {

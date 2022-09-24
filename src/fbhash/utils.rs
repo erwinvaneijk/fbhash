@@ -20,6 +20,7 @@
 
 use indicatif::{ProgressBar, ProgressStyle};
 
+#[derive(Clone, Debug, Copy)]
 pub enum OutputFormat {
     Json,
     Binary,

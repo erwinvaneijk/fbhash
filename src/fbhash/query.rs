@@ -145,15 +145,61 @@ pub fn query_for_results(
     Ok(())
 }
 
-#[cfg(tests)]
+#[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::fbhash::index::index_paths;
+    use float_cmp::approx_eq;
     use pretty_assertions::assert_eq;
+    use tempfile::tempdir;
 
     #[test]
     fn test_deserialization_from_string() {
-        let s = "{\"file\":\"testdata/testfile-zero.bin\",\"chunks\":[],\"digest\":[-8.252427688355256,null,null]}";
-        let doc: Document = serde_json::from_slice(s);
+        let s = "{\"file\":\"testdata/testfile-zero.bin\",\"chunks\":[],\"digest\":[[0, -8.252427688355256]]}";
+        let doc: Document = serde_json::from_slice(s.as_bytes()).unwrap();
         assert_eq!("testdata/testfile-zero.bin", doc.file);
-        assert!(approx_eq(f64, -8.252427, doc.digest[0], epsilon = 0.0));
+        assert!(approx_eq!(
+            f64,
+            -8.252427,
+            doc.digest[0].1,
+            epsilon = 0.000001
+        ));
+    }
+
+    #[test]
+    fn test_full_query() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempdir()?;
+        let state_path = dir.path().join("output_state_file.json");
+        let output_format = OutputFormat::Json;
+        let database_file = dir.path().join("database.json");
+        let paths = vec!["testdata"];
+        let files = vec!["testdata/testfile-yes.bin"];
+        // First index everything
+        index_paths(
+            &paths,
+            state_path.to_str().unwrap(),
+            database_file.to_str().unwrap(),
+            output_format,
+        )?;
+        // Try and open the resulting file
+        let (document_collection, documents) = open_state_and_database(
+            state_path.to_str().unwrap(),
+            database_file.to_str().unwrap(),
+            output_format,
+        )?;
+        // Look up the first document
+        let document = document_collection.compute_digest(files[0]).ok().unwrap();
+        let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
+        // Find the file that matches the first file most
+        let results = ranked_search(
+            &document,
+            &documents,
+            document_collection.number_of_files(),
+            &progress_bar,
+        );
+        assert_eq!(results[0].1.file, files[0].clone());
+        assert!(approx_eq!(f64, 0.000000, results[0].0, epsilon = 0.000001));
+        dir.close()?;
+        Ok(())
     }
 }

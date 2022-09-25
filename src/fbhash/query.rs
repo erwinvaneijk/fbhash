@@ -77,18 +77,18 @@ fn open_state_and_database(
 ) -> Result<(DocumentCollection, Vec<Document>), std::io::Error> {
     let state_file = File::open(state_path)?;
     let progress_bar = create_progress_bar(state_file.metadata()?.len());
-    progress_bar.println(format!("Reading database: {}", state_path));
+    progress_bar.println(format!("Reading state from path: {}", state_path));
     let document_collection: DocumentCollection = match output_format {
         OutputFormat::Json => serde_json::from_reader(&mut progress_bar.wrap_read(state_file))?,
         OutputFormat::Binary => {
             bincode::deserialize_from(&mut progress_bar.wrap_read(state_file)).unwrap()
         }
     };
-    progress_bar.finish_and_clear();
 
-    if console::user_attended() {
-        println!("Reading the database with the files: {}", database_path);
-    }
+    progress_bar.println(format!(
+        "Reading the database with the files: {}",
+        database_path
+    ));
     let inner_file = File::open(database_path)?;
     let expected_length = inner_file.metadata()?.len();
     let mut file = BufReader::new(inner_file);
@@ -98,6 +98,7 @@ fn open_state_and_database(
         }
         OutputFormat::Binary => read_database_binary(&mut file, expected_length as usize)?,
     };
+    progress_bar.finish_and_clear();
     if !verify_consistency(&document_collection, &documents) {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,

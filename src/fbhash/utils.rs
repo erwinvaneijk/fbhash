@@ -27,14 +27,13 @@ pub enum OutputFormat {
 }
 
 pub fn create_progress_bar(size: u64) -> ProgressBar {
-    let pb = if console::user_attended() {
-        ProgressBar::new(size)
+    let pb = if console::user_attended() && console::user_attended_stderr() {
+        let style = ProgressStyle::default_bar()
+            .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+        ProgressBar::new(size).with_style(style)
     } else {
         ProgressBar::hidden()
     };
-    let style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
-    pb.set_style(style);
     pb.set_draw_delta(size / 100);
     pb
 }

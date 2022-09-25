@@ -152,6 +152,7 @@ mod tests {
     use crate::fbhash::index::index_paths;
     use float_cmp::approx_eq;
     use pretty_assertions::assert_eq;
+    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]
@@ -174,7 +175,8 @@ mod tests {
         let output_format = OutputFormat::Json;
         let database_file = dir.path().join("database.json");
         let paths = vec!["testdata"];
-        let files = vec!["testdata/testfile-yes.bin"];
+        let file_name = Path::new("testdata").join("testfile-yes.bin");
+        let files = vec![file_name.to_str()];
         // First index everything
         index_paths(
             &paths,
@@ -189,7 +191,10 @@ mod tests {
             output_format,
         )?;
         // Look up the first document
-        let document = document_collection.compute_digest(files[0]).ok().unwrap();
+        let document = document_collection
+            .compute_digest(files[0].unwrap())
+            .ok()
+            .unwrap();
         let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
         // Find the file that matches the first file most
         let results = ranked_search(
@@ -198,7 +203,7 @@ mod tests {
             document_collection.number_of_files(),
             &progress_bar,
         );
-        assert_eq!(results[0].1.file, files[0].clone());
+        assert_eq!(results[0].1.file, files[0].unwrap());
         assert!(approx_eq!(f64, 0.000000, results[0].0, epsilon = 0.000001));
         dir.close()?;
         Ok(())

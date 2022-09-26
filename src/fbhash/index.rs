@@ -60,13 +60,9 @@ fn write_database_state(updated_results: &[Document], results_file: &str) -> io:
         .iter()
         .progress_with(final_progress)
         .map(|doc| {
-            if let Err(error) = output.write_all(serde_json::to_string(&doc).unwrap().as_bytes()) {
-                Err(error)
-            } else if let Err(error) = output.write_all(b"\n") {
-                Err(error)
-            } else {
-                Ok(())
-            }
+            output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
+            output.write_all(b"\n")?;
+            Ok(())
         })
         .filter(|e| e.is_err())
         .collect();

@@ -242,7 +242,8 @@ mod tests {
     #[test]
     #[cfg(target_os = "windows")]
     fn test_get_files_from_path() {
-        let result = get_files_from_dir(PathBuf::from("testdata"));
+        let test_path = PathBuf::from("testdata");
+        let result = get_files_from_dir(&test_path);
         assert!(eq_lists(
             &[
                 Path::new("testdata\\testfile-yes.bin").to_owned(),

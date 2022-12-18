@@ -23,6 +23,7 @@ use std::cmp::Ordering;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::path::PathBuf;
 
 use crate::fbhash::similarities::*;
 use crate::fbhash::utils::*;
@@ -71,13 +72,16 @@ fn verify_consistency(_document_collection: &DocumentCollection, _documents: &[D
 }
 
 fn open_state_and_database(
-    state_path: &str,
-    database_path: &str,
+    state_path: &PathBuf,
+    database_path: &PathBuf,
     output_format: OutputFormat,
 ) -> Result<(DocumentCollection, Vec<Document>), std::io::Error> {
     let state_file = File::open(state_path)?;
     let progress_bar = create_progress_bar(state_file.metadata()?.len());
-    progress_bar.println(format!("Reading state from path: {}", state_path));
+    progress_bar.println(format!(
+        "Reading state from path: {}",
+        state_path.to_str().expect("Valid filename")
+    ));
     let document_collection: DocumentCollection = match output_format {
         OutputFormat::Json => serde_json::from_reader(&mut progress_bar.wrap_read(state_file))?,
         OutputFormat::Binary => {
@@ -87,7 +91,7 @@ fn open_state_and_database(
 
     progress_bar.println(format!(
         "Reading the database with the files: {}",
-        database_path
+        database_path.to_str().expect("Valid filename")
     ));
     let inner_file = File::open(database_path)?;
     let expected_length = inner_file.metadata()?.len();
@@ -102,7 +106,11 @@ fn open_state_and_database(
     if !verify_consistency(&document_collection, &documents) {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("{} and {} are not consistent", state_path, database_path),
+            format!(
+                "{} and {} are not consistent",
+                state_path.to_str().expect("Valid filename"),
+                database_path.to_str().expect("Valid filename")
+            ),
         ))
     } else {
         Ok((document_collection, documents))
@@ -110,16 +118,19 @@ fn open_state_and_database(
 }
 
 pub fn query_for_results(
-    state_path: &str,
-    database_path: &str,
-    files: &[&str],
+    state_path: &PathBuf,
+    database_path: &PathBuf,
+    files: &[&PathBuf],
     number_of_results: usize,
     output_format: OutputFormat,
 ) -> std::result::Result<(), std::io::Error> {
     let (document_collection, documents) =
         open_state_and_database(state_path, database_path, output_format)?;
     for file_name in files {
-        let document = document_collection.compute_digest(file_name).ok().unwrap();
+        let document = document_collection
+            .compute_digest(file_name.to_str().expect("Valid filename"))
+            .ok()
+            .unwrap();
         let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
         progress_bar.println("Compute the files that are most similar in the set");
         let mut results = ranked_search(&document, &documents, number_of_results, &progress_bar);
@@ -135,10 +146,18 @@ pub fn query_for_results(
             }
         });
         progress_bar.finish_and_clear();
-        println!("Similarities for {}", file_name);
+        println!(
+            "Similarities for {}",
+            file_name.to_str().expect("Valid filename")
+        );
         println!("Results: {}", results.len());
         for result in &results {
-            println!("{} => ({}) {}", file_name, result.0, result.1.file);
+            println!(
+                "{} => ({}) {}",
+                file_name.to_str().expect("Valid filename"),
+                result.0,
+                result.1.file
+            );
         }
         println!();
     }
@@ -173,26 +192,19 @@ mod tests {
         let dir = tempdir()?;
         let state_path = dir.path().join("output_state_file.json");
         let output_format = OutputFormat::Json;
-        let database_file = dir.path().join("database.json");
-        let paths = vec!["testdata"];
-        let file_name = Path::new("testdata").join("testfile-yes.bin");
-        let files = vec![file_name.to_str()];
+        let database_file = dir.path().join("database.json").to_path_buf();
+        let test_data_path = PathBuf::from("testdata");
+        let paths: Vec<&PathBuf> = vec![&test_data_path];
+        let file_name = Path::new("testdata").join("testfile-yes.bin").to_path_buf();
+        let files = vec![file_name];
         // First index everything
-        index_paths(
-            &paths,
-            state_path.to_str().unwrap(),
-            database_file.to_str().unwrap(),
-            output_format,
-        )?;
+        index_paths(paths.as_slice(), &state_path, &database_file, output_format)?;
         // Try and open the resulting file
-        let (document_collection, documents) = open_state_and_database(
-            state_path.to_str().unwrap(),
-            database_file.to_str().unwrap(),
-            output_format,
-        )?;
+        let (document_collection, documents) =
+            open_state_and_database(&state_path, &database_file, output_format)?;
         // Look up the first document
         let document = document_collection
-            .compute_digest(files[0].unwrap())
+            .compute_digest(files[0].to_str().expect("Valid filename"))
             .ok()
             .unwrap();
         let progress_bar = create_progress_bar(document_collection.number_of_files() as u64);
@@ -203,7 +215,10 @@ mod tests {
             document_collection.number_of_files(),
             &progress_bar,
         );
-        assert_eq!(results[0].1.file, files[0].unwrap());
+        assert_eq!(
+            results[0].1.file,
+            files[0].to_str().expect("Valid filename")
+        );
         assert!(approx_eq!(f64, 0.000000, results[0].0, epsilon = 0.000001));
         dir.close()?;
         Ok(())

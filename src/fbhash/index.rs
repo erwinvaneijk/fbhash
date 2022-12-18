@@ -37,7 +37,7 @@ use walkdir::WalkDir;
 use crate::fbhash::similarities::*;
 use crate::fbhash::utils::*;
 
-fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
+fn get_files_from_dir(start_path: &PathBuf) -> Vec<PathBuf> {
     WalkDir::new(start_path)
         .follow_links(false)
         .into_iter()
@@ -47,13 +47,13 @@ fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
 }
 
 // Write the results to a binary file.
-fn write_database_state_binary(results: &[Document], results_file: &str) -> io::Result<()> {
+fn write_database_state_binary(results: &[Document], results_file: &PathBuf) -> io::Result<()> {
     let output = File::create(results_file)?;
     bincode::serialize_into(output, &results).unwrap();
     Ok(())
 }
 
-fn write_database_state(updated_results: &[Document], results_file: &str) -> io::Result<()> {
+fn write_database_state(updated_results: &[Document], results_file: &PathBuf) -> io::Result<()> {
     let final_progress = create_progress_bar(updated_results.len().try_into().unwrap());
     let mut output = File::create(results_file)?;
     let errors: Vec<io::Result<()>> = updated_results
@@ -77,7 +77,7 @@ fn write_database_state(updated_results: &[Document], results_file: &str) -> io:
 }
 
 fn index_directory(
-    start_path: &str,
+    start_path: &PathBuf,
     document_collection: &RefCell<DocumentCollection>,
 ) -> Vec<Document> {
     let files: Vec<PathBuf> = get_files_from_dir(start_path);
@@ -131,9 +131,9 @@ fn index_directory(
 }
 
 pub fn index_paths(
-    paths: &[&str],
-    output_state_file: &str,
-    results_file: &str,
+    paths: &[&PathBuf],
+    output_state_file: &PathBuf,
+    results_file: &PathBuf,
     output_format: OutputFormat,
 ) -> io::Result<()> {
     let document_collection = RefCell::new(DocumentCollection::new());
@@ -192,7 +192,7 @@ pub fn index_paths(
         println!(
             "{} Output file database to {}",
             console::style("[4/4]").bold().dim(),
-            results_file
+            results_file.to_str().expect("Valid filename")
         );
     }
 
@@ -226,7 +226,8 @@ mod tests {
     #[test]
     #[cfg(not(target_os = "windows"))]
     fn test_get_files_from_path() {
-        let result = get_files_from_dir("testdata");
+        let test_path = PathBuf::from("testdata");
+        let result = get_files_from_dir(&test_path);
         assert!(eq_lists(
             &[
                 Path::new("testdata/testfile-zero-length").to_owned(),
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "windows")]
     fn test_get_files_from_path() {
-        let result = get_files_from_dir("testdata");
+        let result = get_files_from_dir(PathBuf::from("testdata"));
         assert!(eq_lists(
             &[
                 Path::new("testdata\\testfile-yes.bin").to_owned(),

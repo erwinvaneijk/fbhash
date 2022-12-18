@@ -45,7 +45,9 @@ fn test_testdata_integration() -> Result<(), Box<dyn std::error::Error>> {
     query_command
         .arg("query")
         .arg(format!("-n={}", number_of_results))
+        .arg("--database")
         .arg(database_file.clone())
+        .arg("--state")
         .arg(output_state_file.clone())
         .arg(files[0]);
 
@@ -97,7 +99,9 @@ fn test_testdata_integration_binary() -> Result<(), Box<dyn std::error::Error>> 
         .arg("--binary")
         .arg("query")
         .arg(format!("-n={}", number_of_results))
+        .arg("--database")
         .arg(database_file.clone())
+        .arg("--state")
         .arg(output_state_file.clone())
         .arg(files[0]);
 
@@ -149,7 +153,9 @@ fn test_testdata_format_wrong() -> Result<(), Box<dyn std::error::Error>> {
     query_command
         .arg("query")
         .arg(format!("-n={}", number_of_results))
+        .arg("--database")
         .arg(database_file.clone())
+        .arg("--state")
         .arg(output_state_file.clone())
         .arg(files[0]);
 
@@ -186,7 +192,9 @@ fn test_testdata_format_wrong_json_to_binary() -> Result<(), Box<dyn std::error:
         .arg("--binary")
         .arg("query")
         .arg(format!("-n={}", number_of_results))
+        .arg("--database")
         .arg(database_file.clone())
+        .arg("--state")
         .arg(output_state_file.clone())
         .arg(files[0]);
 
@@ -249,7 +257,9 @@ fn test_testdata_wrong_combo() -> Result<(), Box<dyn std::error::Error>> {
         .arg("--binary")
         .arg("query")
         .arg(format!("-n={}", number_of_results))
+        .arg("--database")
         .arg(database_file.clone())
+        .arg("--state")
         .arg(second_output_state_file.clone())
         .arg(files[0]);
 

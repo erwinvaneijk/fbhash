@@ -26,8 +26,24 @@ pub enum OutputFormat {
     Binary,
 }
 
-pub fn create_progress_bar(size: u64) -> ProgressBar {
-    let pb = if console::user_attended() && console::user_attended_stderr() {
+#[derive(Clone, Debug, Copy)]
+pub struct Configuration {
+    pub output_format: OutputFormat,
+    pub quiet: bool,
+}
+
+impl Configuration {
+    #[allow(dead_code)]
+    pub fn new(output_format: OutputFormat, quiet: bool) -> Configuration {
+        Configuration {
+            output_format,
+            quiet,
+        }
+    }
+}
+
+pub fn create_progress_bar(size: u64, config: &Configuration) -> ProgressBar {
+    let pb = if !config.quiet {
         let style = ProgressStyle::default_bar()
             .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
             .unwrap();

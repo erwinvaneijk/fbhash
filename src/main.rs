@@ -30,7 +30,7 @@ mod fbhash;
 use clap::{arg, value_parser, Arg, ArgAction, Command};
 use fbhash::index::*;
 use fbhash::query::*;
-use fbhash::utils::OutputFormat;
+use fbhash::utils::{Configuration, OutputFormat};
 use std::path::PathBuf;
 
 fn file_arguments() -> Vec<clap::Arg> {
@@ -60,6 +60,7 @@ fn main() -> std::io::Result<()> {
                 .conflicts_with("json")
                 .action(ArgAction::SetTrue),
         )
+        .arg(arg!(-q --quiet "Suppress all output but the end result").action(ArgAction::SetTrue))
         .subcommand(
             Command::new("index").args(file_arguments()).arg(
                 arg!(<INPUT> ... "Path to directories to process")
@@ -98,6 +99,10 @@ fn main() -> std::io::Result<()> {
     } else {
         OutputFormat::Json
     };
+    let quiet =
+        matches.get_flag("quiet") || !console::user_attended() || !console::user_attended_stderr();
+    let config = Configuration::new(output_format, quiet);
+
     if let Some(subcommand_matches) = matches.subcommand_matches("index") {
         let paths: Vec<&PathBuf> = subcommand_matches
             .get_many::<PathBuf>("INPUT")
@@ -110,12 +115,7 @@ fn main() -> std::io::Result<()> {
             .get_one::<PathBuf>("database")
             .expect("database.json");
 
-        index_paths(
-            paths.as_slice(),
-            output_state_file,
-            results_file,
-            output_format,
-        )?;
+        index_paths(paths.as_slice(), output_state_file, results_file, &config)?;
     } else if let Some(query_subcommand_matches) = matches.subcommand_matches("query") {
         let files: Vec<&PathBuf> = query_subcommand_matches
             .get_many::<PathBuf>("FILE_TO_QUERY")
@@ -135,7 +135,7 @@ fn main() -> std::io::Result<()> {
             database_path,
             &files,
             number_of_results,
-            output_format,
+            &config,
         )?;
     }
     Ok(())

@@ -140,8 +140,8 @@ fn test_quiet_integration() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut index_command = Command::cargo_bin("fbhash")?;
     index_command
-        .arg("index")
         .arg("--quiet")
+        .arg("index")
         .arg("--state")
         .arg(output_state_file.clone())
         .arg("--database")
@@ -151,8 +151,8 @@ fn test_quiet_integration() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut query_command = Command::cargo_bin("fbhash")?;
     query_command
-        .arg("query")
         .arg("--quiet")
+        .arg("query")
         .arg(format!("-n={}", number_of_results))
         .arg("--database")
         .arg(database_file.clone())

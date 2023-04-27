@@ -129,7 +129,7 @@ fn main() -> std::io::Result<()> {
             .unwrap();
         let number_of_results = *query_subcommand_matches
             .get_one::<usize>("RESULT_SIZE")
-            .unwrap_or(&(5 as usize));
+            .unwrap_or(&(5_usize));
         query_for_results(
             state_path,
             database_path,

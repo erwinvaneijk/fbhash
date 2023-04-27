@@ -59,7 +59,7 @@ fn write_database_state(
     config: &Configuration,
 ) -> io::Result<()> {
     match config.output_format {
-        OutputFormat::Binary => write_database_state_binary(&updated_results, results_file),
+        OutputFormat::Binary => write_database_state_binary(updated_results, results_file),
         OutputFormat::Json => {
             let final_progress =
                 create_progress_bar(updated_results.len().try_into().unwrap(), config);
@@ -182,7 +182,7 @@ pub fn index_paths(
         println!("{} Updating statistics...", style("[4/5]").bold().dim());
     }
 
-    let progress_bar: ProgressBar = create_progress_bar(results.len().try_into().unwrap(), &config);
+    let progress_bar: ProgressBar = create_progress_bar(results.len().try_into().unwrap(), config);
     let reference_collection = document_collection.borrow().copy();
     let document_collection_mutex = RwLock::new(reference_collection);
     let updated_results: Vec<Document> = results

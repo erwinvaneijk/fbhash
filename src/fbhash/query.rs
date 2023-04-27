@@ -134,7 +134,7 @@ pub fn query_for_results(
             .ok()
             .unwrap();
         let progress_bar =
-            create_progress_bar(document_collection.number_of_files() as u64, &config);
+            create_progress_bar(document_collection.number_of_files() as u64, config);
         if !config.quiet {
             progress_bar.println("Compute the files that are most similar in the set");
         }

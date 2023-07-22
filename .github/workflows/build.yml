@@ -6,7 +6,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  formatting:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      - name: Rustfmt check
+        uses: actions-rust-lang/rustfmt@v1
   cargo-deny:
+    needs: formatting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3

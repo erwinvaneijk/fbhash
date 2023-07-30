@@ -115,10 +115,8 @@ testdata/testfile-yes.bin => (0.9999999999999999) testdata/testfile-yes.bin\n\n"
     #[cfg(target_os = "windows")]
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
-Results: 3\n\
-testdata/testfile-yes.bin => (0.9999999999999999) testdata\\testfile-yes.bin\n\
-testdata/testfile-yes.bin => (0) testdata\\testfile-zero.bin\n\
-testdata/testfile-yes.bin => (0) testdata\\testfile-zero-length\n\n",
+Results: 1\n\
+testdata/testfile-yes.bin => (0.9999999999999999) testdata\\testfile-yes.bin\n\n",
         files[0]
     ));
 

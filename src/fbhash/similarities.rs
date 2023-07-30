@@ -1,4 +1,4 @@
-// Copyright 2021, Erwin van Eijk
+// Copyright 2021 -- 2023 Erwin van Eijk
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -266,7 +266,7 @@ pub fn ranked_search(
         .map(|other_doc| {
             (other_doc, {
                 progress.inc(1);
-                OrderedFloat(cosine_distance(&other_doc.digest, doc))
+                OrderedFloat(cosine_similarity(&other_doc.digest, doc))
             })
         })
         .for_each(|(d, score)| {
@@ -318,14 +318,9 @@ pub fn cosine_similarity(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
     norm_prod / (norm_a.sqrt() * norm_b.sqrt())
 }
 
-pub fn cosine_distance(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
-    1.0_f64 - cosine_similarity(vec1, vec2)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fbhash::similarities::cosine_similarity;
     use pretty_assertions::{assert_eq, assert_ne};
     use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
     use std::fs::File;

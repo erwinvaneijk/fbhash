@@ -1,4 +1,4 @@
-// Copyright 2021, Erwin van Eijk
+// Copyright 2021 -- 2023, Erwin van Eijk
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -19,23 +19,36 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use indicatif::{ProgressBar, ProgressStyle};
-use std::time::Duration;
 
+#[derive(Clone, Debug, Copy)]
 pub enum OutputFormat {
     Json,
     Binary,
 }
 
-pub fn create_progress_bar(size: u64) -> ProgressBar {
-    let pb = if console::user_attended() {
-        ProgressBar::new(size)
+#[derive(Clone, Debug, Copy)]
+pub struct Configuration {
+    pub output_format: OutputFormat,
+    pub quiet: bool,
+}
+
+impl Configuration {
+    #[allow(dead_code)]
+    pub fn new(output_format: OutputFormat, quiet: bool) -> Configuration {
+        Configuration {
+            output_format,
+            quiet,
+        }
+    }
+}
+
+pub fn create_progress_bar(size: u64, config: &Configuration) -> ProgressBar {
+    if !config.quiet {
+        let style = ProgressStyle::default_bar()
+            .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap();
+        ProgressBar::new(size).with_style(style)
     } else {
         ProgressBar::hidden()
-    };
-    //let style = ProgressStyle::default_bar()
-    //    .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
-    let style = ProgressStyle::default_bar();
-    pb.set_style(style);
-    pb.enable_steady_tick(Duration::from_secs(1));
-    pb
+    }
 }

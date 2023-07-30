@@ -1,4 +1,4 @@
-// Copyright 2021, Erwin van Eijk
+// Copyright 2021 -- 2023 Erwin van Eijk
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -37,7 +37,7 @@ use walkdir::WalkDir;
 use crate::fbhash::similarities::*;
 use crate::fbhash::utils::*;
 
-fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
+fn get_files_from_dir(start_path: &PathBuf) -> Vec<PathBuf> {
     WalkDir::new(start_path)
         .follow_links(false)
         .into_iter()
@@ -47,47 +47,54 @@ fn get_files_from_dir(start_path: &str) -> Vec<PathBuf> {
 }
 
 // Write the results to a binary file.
-fn write_database_state_binary(results: &[Document], results_file: &str) -> io::Result<()> {
+fn write_database_state_binary(results: &[Document], results_file: &PathBuf) -> io::Result<()> {
     let output = File::create(results_file)?;
     bincode::serialize_into(output, &results).unwrap();
     Ok(())
 }
 
-fn write_database_state(updated_results: &[Document], results_file: &str) -> io::Result<()> {
-    let final_progress = create_progress_bar(updated_results.len().try_into().unwrap());
-    let mut output = File::create(results_file)?;
-    let errors: Vec<io::Result<()>> = updated_results
-        .iter()
-        .progress_with(final_progress)
-        .map(|doc| {
-            if let Err(error) = output.write_all(serde_json::to_string(&doc).unwrap().as_bytes()) {
-                Err(error)
-            } else if let Err(error) = output.write_all(b"\n") {
-                Err(error)
-            } else {
+fn write_database_state(
+    updated_results: &[Document],
+    results_file: &PathBuf,
+    config: &Configuration,
+) -> io::Result<()> {
+    match config.output_format {
+        OutputFormat::Binary => write_database_state_binary(updated_results, results_file),
+        OutputFormat::Json => {
+            let final_progress =
+                create_progress_bar(updated_results.len().try_into().unwrap(), config);
+            let mut output = File::create(results_file)?;
+            let errors: Vec<io::Result<()>> = updated_results
+                .iter()
+                .progress_with(final_progress)
+                .map(|doc| {
+                    output.write_all(serde_json::to_string(&doc).unwrap().as_bytes())?;
+                    output.write_all(b"\n")?;
+                    Ok(())
+                })
+                .filter(|e| e.is_err())
+                .collect();
+            if errors.is_empty() {
                 Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    errors[0].as_ref().err().unwrap().to_string(),
+                ))
             }
-        })
-        .filter(|e| e.is_err())
-        .collect();
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            errors[0].as_ref().err().unwrap().to_string(),
-        ))
+        }
     }
 }
 
 fn index_directory(
-    start_path: &str,
+    start_path: &PathBuf,
     document_collection: &RefCell<DocumentCollection>,
+    config: &Configuration,
 ) -> Vec<Document> {
     let files: Vec<PathBuf> = get_files_from_dir(start_path);
     let number_of_files: u64 = files.len().try_into().unwrap();
 
-    let pb = create_progress_bar(number_of_files);
+    let pb = create_progress_bar(number_of_files, config);
     type HashSender = Sender<(HashMap<u64, usize>, String)>;
     type HashReceiver = Receiver<(HashMap<u64, usize>, String)>;
     let (sender, receiver): (HashSender, HashReceiver) = mpsc::channel();
@@ -115,14 +122,14 @@ fn index_directory(
         });
     pb.finish_and_clear();
 
-    if console::user_attended() {
+    if !config.quiet {
         println!(
             "{} Updating the internal dictionary...",
-            style("[2/4]").bold().dim()
+            style("[2/5]").bold().dim()
         );
     }
 
-    let new_pb = create_progress_bar(number_of_files);
+    let new_pb = create_progress_bar(number_of_files, config);
     let mut dc = document_collection.borrow_mut();
     receiver
         .iter()
@@ -135,47 +142,47 @@ fn index_directory(
 }
 
 pub fn index_paths(
-    paths: &[&str],
-    output_state_file: &str,
-    results_file: &str,
-    output_format: OutputFormat,
+    paths: &[&PathBuf],
+    output_state_file: &PathBuf,
+    results_file: &PathBuf,
+    config: &Configuration,
 ) -> io::Result<()> {
     let document_collection = RefCell::new(DocumentCollection::new());
 
-    if console::user_attended() {
+    if !config.quiet {
         println!(
             "{} Processing paths to process...",
-            style("[1/4]").bold().dim()
+            style("[1/5]").bold().dim()
         );
     }
 
     let mut results: Vec<_> = Vec::new();
     for path in paths.iter() {
-        let mut intermediate_results = index_directory(path, &document_collection);
+        let mut intermediate_results = index_directory(path, &document_collection, config);
         results.append(&mut intermediate_results);
     }
 
-    if console::user_attended() {
+    if !config.quiet {
         println!(
             "{} Output the frequencies state...",
-            style("[2/4]").bold().dim()
+            style("[3/5]").bold().dim()
         );
     }
 
     let mut state_output = File::create(output_state_file)?;
     let doc_ref: &DocumentCollection = &(document_collection.borrow());
-    match output_format {
+    match config.output_format {
         OutputFormat::Json => {
             state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?
         }
         OutputFormat::Binary => bincode::serialize_into(state_output, doc_ref).unwrap(),
     }
 
-    if console::user_attended() {
-        println!("{} Updating statistics...", style("[3/4]").bold().dim());
+    if !config.quiet {
+        println!("{} Updating statistics...", style("[4/5]").bold().dim());
     }
 
-    let progress_bar: ProgressBar = create_progress_bar(results.len().try_into().unwrap());
+    let progress_bar: ProgressBar = create_progress_bar(results.len().try_into().unwrap(), config);
     let reference_collection = document_collection.borrow().copy();
     let document_collection_mutex = RwLock::new(reference_collection);
     let updated_results: Vec<Document> = results
@@ -192,19 +199,16 @@ pub fn index_paths(
         .collect();
     progress_bar.finish_and_clear();
 
-    if console::user_attended() {
+    if !config.quiet {
         println!(
             "{} Output file database to {}",
-            console::style("[4/4]").bold().dim(),
-            results_file
+            console::style("[5/5]").bold().dim(),
+            results_file.to_str().expect("Valid filename")
         );
     }
 
-    progress_bar.reset();
-    match output_format {
-        OutputFormat::Json => write_database_state(&updated_results, results_file),
-        OutputFormat::Binary => write_database_state_binary(&updated_results, results_file),
-    }
+    progress_bar.finish_and_clear();
+    write_database_state(&updated_results, results_file, config)
 }
 
 #[cfg(test)]
@@ -230,7 +234,8 @@ mod tests {
     #[test]
     #[cfg(not(target_os = "windows"))]
     fn test_get_files_from_path() {
-        let result = get_files_from_dir("testdata");
+        let test_path = PathBuf::from("testdata");
+        let result = get_files_from_dir(&test_path);
         assert!(eq_lists(
             &[
                 Path::new("testdata/testfile-zero-length").to_owned(),
@@ -245,7 +250,8 @@ mod tests {
     #[test]
     #[cfg(target_os = "windows")]
     fn test_get_files_from_path() {
-        let result = get_files_from_dir("testdata");
+        let test_path = PathBuf::from("testdata");
+        let result = get_files_from_dir(&test_path);
         assert!(eq_lists(
             &[
                 Path::new("testdata\\testfile-yes.bin").to_owned(),

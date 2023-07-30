@@ -275,7 +275,6 @@ pub fn ranked_search(
     let mut result = Vec::new();
     queue
         .into_sorted_iter()
-        .into_iter()
         .for_each(|(doc, similarity)| {
             result.push((similarity.into_inner(), doc.clone()));
         });

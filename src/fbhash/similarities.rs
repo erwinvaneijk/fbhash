@@ -18,15 +18,15 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use crate::fbhash::chunker::ChunkIterator;
 use hashbrown::HashMap;
 use indicatif::ProgressBar;
+use ordered_float::OrderedFloat;
+use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io;
-
-use crate::fbhash::chunker::ChunkIterator;
-use crate::fbhash::heap::Heap;
 
 pub fn file_to_chunks(file: File) -> Vec<u64> {
     let chunk_iterator = ChunkIterator::new(file);
@@ -260,22 +260,25 @@ pub fn ranked_search(
     k: usize,
     progress: &ProgressBar,
 ) -> Vec<(f64, Document)> {
-    let mut queue = Heap::new(k);
+    let mut queue = PriorityQueue::with_capacity(k);
     documents
         .iter()
         .map(|other_doc| {
             (other_doc, {
                 progress.inc(1);
-                cosine_distance(&other_doc.digest, doc)
+                OrderedFloat(cosine_distance(&other_doc.digest, doc))
             })
         })
         .for_each(|(d, score)| {
-            queue.insert(score, d);
+            queue.push(d, score);
         });
     let mut result = Vec::new();
-    for (similarity, doc) in queue.get_elements() {
-        result.push((similarity, doc.clone()));
-    }
+    queue
+        .into_sorted_iter()
+        .into_iter()
+        .for_each(|(doc, similarity)| {
+            result.push((similarity.into_inner(), doc.clone()));
+        });
     result
 }
 

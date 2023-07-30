@@ -19,6 +19,7 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use indicatif::{ProgressBar, ProgressStyle};
+use std::time::Duration;
 
 pub enum OutputFormat {
     Json,
@@ -31,9 +32,10 @@ pub fn create_progress_bar(size: u64) -> ProgressBar {
     } else {
         ProgressBar::hidden()
     };
-    let style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+    //let style = ProgressStyle::default_bar()
+    //    .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}");
+    let style = ProgressStyle::default_bar();
     pb.set_style(style);
-    pb.set_draw_delta(size / 100);
+    pb.enable_steady_tick(Duration::from_secs(1));
     pb
 }

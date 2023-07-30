@@ -129,7 +129,7 @@ impl Iterator for ChunkIterator {
                     }
                 }
             }
-            Some(_) => {
+            Some(_) => { 
                 let mut b: Vec<u8> = vec![1];
                 match self.file.read(&mut b) {
                     Ok(0) => None,

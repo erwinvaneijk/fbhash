@@ -18,13 +18,13 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use std::cmp::{Ordering, Reverse};
 use crate::fbhash::chunker::ChunkIterator;
 use hashbrown::HashMap;
 use indicatif::ProgressBar;
 use ordered_float::OrderedFloat;
-use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::fs::File;
 use std::io;
 
@@ -254,31 +254,48 @@ impl std::hash::Hash for DocumentCollection {
     }
 }
 
+struct DocumentScore {
+    score: OrderedFloat<f64>,
+    document: Document,
+}
+
+impl Eq for DocumentScore {}
+
+impl Ord for DocumentScore {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score.partial_cmp(&other.score).unwrap()
+    }
+}
+
+impl PartialEq for DocumentScore {
+    fn eq(&self, other: &Self) -> bool {
+        self.score == other.score
+    }
+}
+
+impl PartialOrd for DocumentScore {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 pub fn ranked_search(
     doc: &[(u64, f64)],
     documents: &[Document],
     k: usize,
     progress: &ProgressBar,
 ) -> Vec<(f64, Document)> {
-    let mut queue = PriorityQueue::with_capacity(k);
+    let mut queue: BinaryHeap<Reverse<DocumentScore>> = BinaryHeap::with_capacity(documents.len());
     documents
         .iter()
-        .map(|other_doc| {
-            (other_doc, {
-                progress.inc(1);
-                OrderedFloat(cosine_similarity(&other_doc.digest, doc))
-            })
-        })
-        .for_each(|(d, score)| {
-            queue.push(d, score);
+        .for_each(|other_doc| {
+            queue.push(Reverse(DocumentScore {
+                score: OrderedFloat(cosine_similarity(&other_doc.digest, doc)),
+                document: other_doc.clone(),
+            }));
+            progress.inc(1);
         });
-    let mut result = Vec::new();
-    queue
-        .into_sorted_iter()
-        .for_each(|(doc, similarity)| {
-            result.push((similarity.into_inner(), doc.clone()));
-        });
-    result
+    queue.into_sorted_vec().into_iter().take(k).map(|doc_score| (doc_score.0.score.0, doc_score.0.document)).collect::<Vec<_>>()
 }
 
 //

@@ -107,17 +107,17 @@ fn test_testdata_integration_single_result() -> Result<(), Box<dyn std::error::E
     #[cfg(not(target_os = "windows"))]
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
-Results: 1\n\
+Results: {}\n\
 testdata/testfile-yes.bin => (0.9999999999999999) testdata/testfile-yes.bin\n\n",
-        files[0]
+        files[0], number_of_results
     ));
 
     #[cfg(target_os = "windows")]
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
-Results: 1\n\
+Results: {}\n\
 testdata/testfile-yes.bin => (0.9999999999999999) testdata\\testfile-yes.bin\n\n",
-        files[0]
+        files[0], number_of_results
     ));
 
     dir.close()?;

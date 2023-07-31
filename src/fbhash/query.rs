@@ -150,6 +150,8 @@ pub fn query_for_results(
                 a.1.file.cmp(&b.1.file)
             }
         });
+        // Get the best results first.
+        results.reverse();
         progress_bar.finish_and_clear();
         println!(
             "Similarities for {}",
@@ -225,7 +227,8 @@ mod tests {
             results[0].1.file,
             files[0].to_str().expect("Valid filename")
         );
-        assert!(approx_eq!(f64, 0.000000, results[0].0, epsilon = 0.000001));
+        // We are matching similarity now, to find the most similar file.
+        assert!(approx_eq!(f64, 1.000000, results[0].0, epsilon = 0.000001));
         dir.close()?;
         Ok(())
     }

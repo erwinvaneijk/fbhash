@@ -55,9 +55,9 @@ fn test_testdata_integration() -> Result<(), Box<dyn std::error::Error>> {
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
 Results: 3\n\
-testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata/testfile-yes.bin\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero-length\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n\n",
+testdata/testfile-yes.bin => (0.9999999999999999) testdata/testfile-yes.bin\n\
+testdata/testfile-yes.bin => (0) testdata/testfile-zero.bin\n\
+testdata/testfile-yes.bin => (0) testdata/testfile-zero-length\n\n",
         files[0]
     ));
 
@@ -65,15 +65,65 @@ testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n\n",
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
 Results: 3\n\
-testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata\\testfile-yes.bin\n\
-testdata/testfile-yes.bin => (1) testdata\\testfile-zero-length\n\
-testdata/testfile-yes.bin => (1) testdata\\testfile-zero.bin\n\n",
+testdata/testfile-yes.bin => (0.9999999999999999) testdata\\testfile-yes.bin\n\
+testdata/testfile-yes.bin => (0) testdata\\testfile-zero.bin\n\
+testdata/testfile-yes.bin => (0) testdata\\testfile-zero-length\n\n",
         files[0]
     ));
 
     dir.close()?;
     Ok(())
 }
+
+#[test]
+fn test_testdata_integration_single_result() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = tempdir()?;
+    let output_state_file = dir.path().join("output_state_file.json");
+    let database_file = dir.path().join("database.json");
+    let paths = vec!["testdata"];
+    let files = vec!["testdata/testfile-yes.bin"];
+    let number_of_results = 1;
+
+    let mut index_command = Command::cargo_bin("fbhash")?;
+    index_command
+        .arg("index")
+        .arg("--state")
+        .arg(output_state_file.clone())
+        .arg("--database")
+        .arg(database_file.to_str().unwrap())
+        .arg(paths[0]);
+    index_command.assert().success();
+
+    let mut query_command = Command::cargo_bin("fbhash")?;
+    query_command
+        .arg("query")
+        .arg(format!("-n={}", number_of_results))
+        .arg("--database")
+        .arg(database_file.clone())
+        .arg("--state")
+        .arg(output_state_file.clone())
+        .arg(files[0]);
+
+    #[cfg(not(target_os = "windows"))]
+    query_command.assert().success().stdout(format!(
+        "Similarities for {}\n\
+Results: {}\n\
+testdata/testfile-yes.bin => (0.9999999999999999) testdata/testfile-yes.bin\n\n",
+        files[0], number_of_results
+    ));
+
+    #[cfg(target_os = "windows")]
+    query_command.assert().success().stdout(format!(
+        "Similarities for {}\n\
+Results: {}\n\
+testdata/testfile-yes.bin => (0.9999999999999999) testdata\\testfile-yes.bin\n\n",
+        files[0], number_of_results
+    ));
+
+    dir.close()?;
+    Ok(())
+}
+
 
 #[test]
 fn test_testdata_integration_binary() -> Result<(), Box<dyn std::error::Error>> {
@@ -109,9 +159,9 @@ fn test_testdata_integration_binary() -> Result<(), Box<dyn std::error::Error>> 
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
 Results: 3\n\
-testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata/testfile-yes.bin\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero-length\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n\n",
+testdata/testfile-yes.bin => (0.9999999999999999) testdata/testfile-yes.bin\n\
+testdata/testfile-yes.bin => (0) testdata/testfile-zero.bin\n\
+testdata/testfile-yes.bin => (0) testdata/testfile-zero-length\n\n",
         files[0]
     ));
 
@@ -119,9 +169,9 @@ testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n\n",
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
 Results: 3\n\
-testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata\\testfile-yes.bin\n\
-testdata/testfile-yes.bin => (1) testdata\\testfile-zero-length\n\
-testdata/testfile-yes.bin => (1) testdata\\testfile-zero.bin\n\n",
+testdata/testfile-yes.bin => (0.9999999999999999) testdata\\testfile-yes.bin\n\
+testdata/testfile-yes.bin => (0) testdata\\testfile-zero.bin\n\
+testdata/testfile-yes.bin => (0) testdata\\testfile-zero-length\n\n",
         files[0]
     ));
 
@@ -164,9 +214,9 @@ fn test_quiet_integration() -> Result<(), Box<dyn std::error::Error>> {
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
 Results: 3\n\
-testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata/testfile-yes.bin\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero-length\n\
-testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n\n",
+testdata/testfile-yes.bin => (0.9999999999999999) testdata/testfile-yes.bin\n\
+testdata/testfile-yes.bin => (0) testdata/testfile-zero.bin\n\
+testdata/testfile-yes.bin => (0) testdata/testfile-zero-length\n\n",
         files[0]
     ));
 
@@ -174,9 +224,9 @@ testdata/testfile-yes.bin => (1) testdata/testfile-zero.bin\n\n",
     query_command.assert().success().stdout(format!(
         "Similarities for {}\n\
 Results: 3\n\
-testdata/testfile-yes.bin => (0.00000000000000011102230246251565) testdata\\testfile-yes.bin\n\
-testdata/testfile-yes.bin => (1) testdata\\testfile-zero-length\n\
-testdata/testfile-yes.bin => (1) testdata\\testfile-zero.bin\n\n",
+testdata/testfile-yes.bin => (0.9999999999999999) testdata\\testfile-yes.bin\n\
+testdata/testfile-yes.bin => (0) testdata\\testfile-zero.bin\n\
+testdata/testfile-yes.bin => (0) testdata\\testfile-zero-length\n\n",
         files[0]
     ));
 

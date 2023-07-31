@@ -18,15 +18,15 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use std::cmp::{Ordering, Reverse};
+use crate::fbhash::chunker::ChunkIterator;
 use hashbrown::HashMap;
 use indicatif::ProgressBar;
+use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::fs::File;
 use std::io;
-
-use crate::fbhash::chunker::ChunkIterator;
-use crate::fbhash::heap::Heap;
 
 pub fn file_to_chunks(file: File) -> Vec<u64> {
     let chunk_iterator = ChunkIterator::new(file);
@@ -254,29 +254,48 @@ impl std::hash::Hash for DocumentCollection {
     }
 }
 
+struct DocumentScore {
+    score: OrderedFloat<f64>,
+    document: Document,
+}
+
+impl Eq for DocumentScore {}
+
+impl Ord for DocumentScore {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score.partial_cmp(&other.score).unwrap()
+    }
+}
+
+impl PartialEq for DocumentScore {
+    fn eq(&self, other: &Self) -> bool {
+        self.score == other.score
+    }
+}
+
+impl PartialOrd for DocumentScore {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 pub fn ranked_search(
     doc: &[(u64, f64)],
     documents: &[Document],
     k: usize,
     progress: &ProgressBar,
 ) -> Vec<(f64, Document)> {
-    let mut queue = Heap::new(k);
+    let mut queue: BinaryHeap<Reverse<DocumentScore>> = BinaryHeap::with_capacity(documents.len());
     documents
         .iter()
-        .map(|other_doc| {
-            (other_doc, {
-                progress.inc(1);
-                cosine_distance(&other_doc.digest, doc)
-            })
-        })
-        .for_each(|(d, score)| {
-            queue.insert(score, d);
+        .for_each(|other_doc| {
+            queue.push(Reverse(DocumentScore {
+                score: OrderedFloat(cosine_similarity(&other_doc.digest, doc)),
+                document: other_doc.clone(),
+            }));
+            progress.inc(1);
         });
-    let mut result = Vec::new();
-    for (similarity, doc) in queue.get_elements() {
-        result.push((similarity, doc.clone()));
-    }
-    result
+    queue.into_sorted_vec().into_iter().take(k).map(|doc_score| (doc_score.0.score.0, doc_score.0.document)).collect::<Vec<_>>()
 }
 
 //
@@ -315,14 +334,9 @@ pub fn cosine_similarity(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
     norm_prod / (norm_a.sqrt() * norm_b.sqrt())
 }
 
-pub fn cosine_distance(vec1: &[(u64, f64)], vec2: &[(u64, f64)]) -> f64 {
-    1.0_f64 - cosine_similarity(vec1, vec2)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fbhash::similarities::cosine_similarity;
     use pretty_assertions::{assert_eq, assert_ne};
     use serde_test::{assert_de_tokens, assert_ser_tokens, assert_tokens, Token};
     use std::fs::File;

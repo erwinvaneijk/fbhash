@@ -207,8 +207,9 @@ pub fn index_paths(
         );
     }
 
+    let res = write_database_state(&updated_results, results_file, config);
     progress_bar.finish_and_clear();
-    write_database_state(&updated_results, results_file, config)
+    res
 }
 
 #[cfg(test)]

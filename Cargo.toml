@@ -58,6 +58,6 @@ features = ["serde", "rayon"]
 pretty_assertions = "1.3.0"
 float-cmp = "~0.9.0"
 serde_test = "~1.0"
-tempfile = "3.7.0"
+tempfile = "3.8.1"
 assert_cmd = "~2.0.7"
 predicates = "3.0.3"

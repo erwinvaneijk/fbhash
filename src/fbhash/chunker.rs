@@ -115,13 +115,12 @@ impl Iterator for ChunkIterator {
         match self.last_chunk {
             None => {
                 let mut initial_content = vec![0; CHUNK_SIZE];
-                match self.file.read(&mut initial_content) {
-                    Err(_) => None,
-                    Ok(_) => {
-                        let chunk = self.chunk_content.setup(&initial_content);
-                        self.last_chunk = Some(chunk);
-                        Some(chunk)
-                    }
+                if self.file.read_exact(&mut initial_content).is_ok() {
+                    let chunk = self.chunk_content.setup(&initial_content);
+                    self.last_chunk = Some(chunk);
+                    Some(chunk)
+                } else {
+                    None
                 }
             }
             Some(_) => {

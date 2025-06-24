@@ -27,7 +27,6 @@ const MODULUS: u64 = 801385653117583579;
 
 #[derive(Clone, Debug, Copy)]
 pub struct Chunk {
-    pub number: usize,
     pub digest: u64,
 }
 
@@ -54,7 +53,6 @@ impl ChunkContent {
     pub fn setup(&mut self, v: &[u8]) -> Chunk {
         self.content.copy_from_slice(v);
         Chunk {
-            number: self.current_number,
             digest: self.compute_digest(),
         }
     }
@@ -69,10 +67,7 @@ impl ChunkContent {
         self.content[CHUNK_SIZE - 1] = new_byte;
         self.current_number += 1;
         let new_digest = self.rehash_digest(previous, first_byte, new_byte);
-        Chunk {
-            number: self.current_number,
-            digest: new_digest,
-        }
+        Chunk { digest: new_digest }
     }
 
     fn rehash_digest(&mut self, digest: u64, old_byte: u8, new_byte: u8) -> u64 {
@@ -129,7 +124,7 @@ impl Iterator for ChunkIterator {
                     }
                 }
             }
-            Some(_) => { 
+            Some(_) => {
                 let mut b: Vec<u8> = vec![1];
                 match self.file.read(&mut b) {
                     Ok(0) => None,
@@ -170,7 +165,6 @@ mod tests {
         let mut chunk_iterator = ChunkIterator::new(f);
         let chunk = chunk_iterator.next().unwrap();
 
-        assert_eq!(chunk.number, 0);
         assert_eq!(chunk.digest, 0);
         Ok(())
     }
@@ -181,8 +175,7 @@ mod tests {
         let chunk_iterator = ChunkIterator::new(f);
         let chunks: Vec<_> = chunk_iterator.collect();
         assert_eq!(chunks.len(), 512 - 6);
-        for (i, chunk) in chunks.iter().enumerate() {
-            assert_eq!(chunk.number, i);
+        for (_, chunk) in chunks.iter().enumerate() {
             assert_eq!(chunk.digest, 0);
         }
         Ok(())
@@ -194,8 +187,7 @@ mod tests {
         let chunk_iterator = ChunkIterator::new(f);
         let chunks: Vec<_> = chunk_iterator.collect();
         assert_eq!(chunks.len(), 1);
-        for (i, chunk) in chunks.iter().enumerate() {
-            assert_eq!(chunk.number, i);
+        for (_, chunk) in chunks.iter().enumerate() {
             assert_eq!(chunk.digest, 0);
         }
         Ok(())
@@ -206,13 +198,10 @@ mod tests {
         let f = File::open("testdata/testfile-yes.bin")?;
         let mut chunk_iterator = ChunkIterator::new(f);
         let chunk0 = chunk_iterator.next().unwrap();
-        assert_eq!(chunk0.number, 0);
         assert_eq!(chunk0.digest, 33279275454869446);
         let chunk1 = chunk_iterator.next().unwrap();
-        assert_eq!(chunk1.number, 1);
         assert_eq!(chunk1.digest, 2879926931474365);
         let chunk2 = chunk_iterator.next().unwrap();
-        assert_eq!(chunk2.number, 2);
         assert_eq!(chunk2.digest, 33279275454869446);
         Ok(())
     }
@@ -226,7 +215,6 @@ mod tests {
         let chunks: Vec<_> = chunk_iterator.collect();
         assert_eq!(chunks.len(), 512 - 6);
         for (i, chunk) in chunks.iter().enumerate() {
-            assert_eq!(chunk.number, i);
             if i % 2 == 0 {
                 assert_eq!(chunk.digest, 33279275454869446);
             } else {

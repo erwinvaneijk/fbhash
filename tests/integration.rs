@@ -302,17 +302,10 @@ fn test_testdata_format_wrong_json_to_binary() -> Result<(), Box<dyn std::error:
         .arg(output_state_file.clone())
         .arg(files[0]);
 
-    #[cfg(not(target_os = "windows"))]
     query_command
         .assert()
         .failure()
         .stderr("Error: Custom { kind: InvalidData, error: \"Failed to read state file\" }\n");
-
-    #[cfg(target_os = "windows")]
-    query_command
-        .assert()
-        .failure()
-        .stderr("memory allocation of 2308757952953217893 bytes failed\n");
 
     dir.close()?;
     Ok(())

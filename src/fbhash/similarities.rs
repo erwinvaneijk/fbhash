@@ -1015,7 +1015,7 @@ mod tests {
 
     #[test]
     fn test_serialization_document_set_state() {
-        let names = vec!["testdata/testfile-yes.bin", "testdata/testfile-zero.bin"];
+        let names = ["testdata/testfile-yes.bin", "testdata/testfile-zero.bin"];
         let mut document_collection = DocumentCollection::new();
         let _ = document_collection.add_file(names[0]);
         let _ = document_collection.add_file(names[1]);

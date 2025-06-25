@@ -27,8 +27,8 @@ fn test_testdata_integration() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
     let output_state_file = dir.path().join("output_state_file.json");
     let database_file = dir.path().join("database.json");
-    let paths = vec!["testdata"];
-    let files = vec!["testdata/testfile-yes.bin"];
+    let paths = ["testdata"];
+    let files = ["testdata/testfile-yes.bin"];
     let number_of_results = 5;
 
     let mut index_command = Command::cargo_bin("fbhash")?;
@@ -80,8 +80,8 @@ fn test_testdata_integration_single_result() -> Result<(), Box<dyn std::error::E
     let dir = tempdir()?;
     let output_state_file = dir.path().join("output_state_file.json");
     let database_file = dir.path().join("database.json");
-    let paths = vec!["testdata"];
-    let files = vec!["testdata/testfile-yes.bin"];
+    let paths = ["testdata"];
+    let files = ["testdata/testfile-yes.bin"];
     let number_of_results = 1;
 
     let mut index_command = Command::cargo_bin("fbhash")?;
@@ -129,8 +129,8 @@ fn test_testdata_integration_binary() -> Result<(), Box<dyn std::error::Error>> 
     let dir = tempdir()?;
     let output_state_file = dir.path().join("output_state_file.bin");
     let database_file = dir.path().join("database.bin");
-    let paths = vec!["testdata"];
-    let files = vec!["testdata/testfile-yes.bin"];
+    let paths = ["testdata"];
+    let files = ["testdata/testfile-yes.bin"];
     let number_of_results = 5;
 
     let mut index_command = Command::cargo_bin("fbhash")?;
@@ -183,8 +183,8 @@ fn test_quiet_integration() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
     let output_state_file = dir.path().join("output_state_file.json");
     let database_file = dir.path().join("database.json");
-    let paths = vec!["testdata"];
-    let files = vec!["testdata/testfile-yes.bin"];
+    let paths = ["testdata"];
+    let files = ["testdata/testfile-yes.bin"];
     let number_of_results = 5;
 
     let mut index_command = Command::cargo_bin("fbhash")?;
@@ -238,8 +238,8 @@ fn test_testdata_format_wrong() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
     let output_state_file = dir.path().join("output_state_file.bin");
     let database_file = dir.path().join("database.bin");
-    let paths = vec!["testdata"];
-    let files = vec!["testdata/testfile-yes.bin"];
+    let paths = ["testdata"];
+    let files = ["testdata/testfile-yes.bin"];
     let number_of_results = 5;
 
     let mut index_command = Command::cargo_bin("fbhash")?;
@@ -278,8 +278,8 @@ fn test_testdata_format_wrong_json_to_binary() -> Result<(), Box<dyn std::error:
     let dir = tempdir()?;
     let output_state_file = dir.path().join("output_state_file.bin");
     let database_file = dir.path().join("database.bin");
-    let paths = vec!["testdata"];
-    let files = vec!["testdata/testfile-yes.bin"];
+    let paths = ["testdata"];
+    let files = ["testdata/testfile-yes.bin"];
     let number_of_results = 5;
 
     let mut index_command = Command::cargo_bin("fbhash")?;
@@ -325,8 +325,8 @@ fn test_testdata_wrong_combo() -> Result<(), Box<dyn std::error::Error>> {
     let second_output_state_file = dir.path().join("second_output_state_file.bin");
     let database_file = dir.path().join("database.bin");
     let second_database_file = dir.path().join("second_database.bin");
-    let paths = vec!["testdata"];
-    let files = vec!["testdata/testfile-yes.bin"];
+    let paths = ["testdata"];
+    let files = ["testdata/testfile-yes.bin"];
     let number_of_results = 5;
 
     let mut index_command = Command::cargo_bin("fbhash")?;

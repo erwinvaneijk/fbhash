@@ -174,7 +174,7 @@ mod tests {
         let chunk_iterator = ChunkIterator::new(f);
         let chunks: Vec<_> = chunk_iterator.collect();
         assert_eq!(chunks.len(), 512 - 6);
-        for (_, chunk) in chunks.iter().enumerate() {
+        for chunk in chunks.iter() {
             assert_eq!(chunk.digest, 0);
         }
         Ok(())

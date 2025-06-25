@@ -218,7 +218,7 @@ mod tests {
         let test_data_path = PathBuf::from("testdata");
         let paths: Vec<&PathBuf> = vec![&test_data_path];
         let file_name = Path::new("testdata").join("testfile-yes.bin").to_path_buf();
-        let files = vec![file_name];
+        let files = [file_name];
         // First index everything
         index_paths(paths.as_slice(), &state_path, &database_file, &config)?;
         // Try and open the resulting file

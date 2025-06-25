@@ -11,11 +11,13 @@ ignore = [
 [licenses]
 # List of explicitly allowed licenses
 allow = [
-  "Apache-2.0 WITH LLVM-exception",
   "Apache-2.0",
-  "MIT",
+  "BSL-1.0",
+  "EUPL-1.2",
   "Unlicense",
   "Unicode-3.0",
+  "BSD-2-Clause",
+  "MIT",
 ]
 confidence-threshold = 0.8
 

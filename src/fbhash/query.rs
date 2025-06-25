@@ -18,6 +18,7 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use bincode::config;
 use hashbrown::HashSet;
 use std::cmp::Ordering;
 use std::fs::File;
@@ -56,7 +57,9 @@ fn read_database_binary<R: BufRead>(
     config: &Configuration,
 ) -> Result<Vec<Document>, std::io::Error> {
     let progress_bar = create_progress_bar(expected_files as u64, config);
-    let documents: Vec<Document> = bincode::deserialize_from(progress_bar.wrap_read(file)).unwrap();
+    let config: config::Configuration = bincode::config::standard();
+    let documents: Vec<Document> =
+        bincode::serde::decode_from_std_read(&mut progress_bar.wrap_read(file), config).unwrap();
     progress_bar.finish_and_clear();
     Ok(documents)
 }
@@ -87,7 +90,19 @@ fn open_state_and_database(
     let document_collection: DocumentCollection = match config.output_format {
         OutputFormat::Json => serde_json::from_reader(&mut progress_bar.wrap_read(state_file))?,
         OutputFormat::Binary => {
-            bincode::deserialize_from(&mut progress_bar.wrap_read(state_file)).unwrap()
+            let config: config::Configuration = bincode::config::standard();
+            match bincode::serde::decode_from_std_read(
+                &mut progress_bar.wrap_read(state_file),
+                config,
+            ) {
+                Ok(collection) => collection,
+                Err(_) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Failed to read state file",
+                    ))
+                }
+            }
         }
     };
 

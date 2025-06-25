@@ -48,8 +48,9 @@ fn get_files_from_dir(start_path: &PathBuf) -> Vec<PathBuf> {
 
 // Write the results to a binary file.
 fn write_database_state_binary(results: &[Document], results_file: &PathBuf) -> io::Result<()> {
-    let output = File::create(results_file)?;
-    bincode::serialize_into(output, &results).unwrap();
+    let mut output = File::create(results_file)?;
+    let config: bincode::config::Configuration = bincode::config::standard();
+    bincode::serde::encode_into_std_write(results, &mut output, config).unwrap();
     Ok(())
 }
 
@@ -77,8 +78,7 @@ fn write_database_state(
             if errors.is_empty() {
                 Ok(())
             } else {
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
+                Err(io::Error::other(
                     errors[0].as_ref().err().unwrap().to_string(),
                 ))
             }
@@ -175,7 +175,10 @@ pub fn index_paths(
         OutputFormat::Json => {
             state_output.write_all(serde_json::to_string_pretty(doc_ref).unwrap().as_bytes())?
         }
-        OutputFormat::Binary => bincode::serialize_into(state_output, doc_ref).unwrap(),
+        OutputFormat::Binary => {
+            let config: bincode::config::Configuration = bincode::config::standard();
+            bincode::serde::encode_into_std_write(doc_ref, &mut state_output, config).unwrap();
+        }
     }
 
     if !config.quiet {

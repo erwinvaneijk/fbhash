@@ -185,10 +185,8 @@ mod tests {
         let f = File::open("testdata/testfile-zero-length")?;
         let chunk_iterator = ChunkIterator::new(f);
         let chunks: Vec<_> = chunk_iterator.collect();
-        assert_eq!(chunks.len(), 1);
-        for (_, chunk) in chunks.iter().enumerate() {
-            assert_eq!(chunk.digest, 0);
-        }
+        // The file is empty, so there should be no chunks.
+        assert_eq!(chunks.len(), 0);
         Ok(())
     }
 

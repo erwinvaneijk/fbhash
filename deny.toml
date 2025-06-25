@@ -9,8 +9,6 @@ ignore = [
 ]
 
 [licenses]
-# The lint level for crates which do not have a detectable license
-unlicensed = "deny"
 # List of explicitly allowed licenses
 allow = [
   "Apache-2.0 WITH LLVM-exception",

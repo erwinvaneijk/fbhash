@@ -12,16 +12,37 @@ jobs:
           log-level: warn
           command: check
           arguments: --all-features
-  build:
+  conventional:
     needs: cargo-deny
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: webiny/action-conventional-commits@v1.3.0
+  unit-tests:
+    needs: conventional
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.rust == 'nightly' }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [msrv, stable, beta, nightly]
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: cargo build --verbose
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - run: rustup toolchain install ${{ matrix.rust == 'msrv' && env.msrv || matrix.rust }} --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-hack
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 5
+          command: cargo install cargo-hack
+      - name: Run rustfmt checks
+        run: cargo fmt --all --check
+      - name: Run clippy checks
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo hack test
 
